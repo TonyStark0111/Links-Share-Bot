@@ -164,11 +164,10 @@ async def start_command(client: Bot, message: Message):
                 parse_mode=ParseMode.HTML
             )
             print(f"Decoding error: {e}")
-    else:
+    else: 
         inline_buttons = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("• ᴀʙᴏᴜᴛ", callback_data="about"),
-                 InlineKeyboardButton("• ᴄʜᴀɴɴᴇʟs", callback_data="channels")],
+                [InlineKeyboardButton("• ᴀʙᴏᴜᴛ", callback_data="about")],
                 [InlineKeyboardButton("• Close •", callback_data="close")]
             ]
         )
