@@ -346,6 +346,7 @@ async def is_approval_off(channel_id: int) -> bool:
         return False
 
 # Global setting for clean join/left messages
+# Global setting for clean join/left messages
 global_settings_collection = database['global_settings']
 
 async def set_global_clean_joinleft(enabled: bool) -> bool:
