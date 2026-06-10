@@ -344,3 +344,30 @@ async def is_approval_off(channel_id: int) -> bool:
     except Exception as e:
         print(f"Error checking approval_off for channel {channel_id}: {e}")
         return False
+
+# database/database.py (add at the end)
+
+# Collection for clean join/left settings
+clean_settings_collection = database['clean_joinleft_settings']
+
+async def set_clean_joinleft(chat_id: int, enabled: bool) -> bool:
+    """Enable/disable auto-deletion of join/left messages for a chat."""
+    try:
+        await clean_settings_collection.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"enabled": enabled, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        print(f"Error setting clean_joinleft for {chat_id}: {e}")
+        return False
+
+async def get_clean_joinleft(chat_id: int) -> bool:
+    """Get current setting for a chat (default: True)."""
+    try:
+        doc = await clean_settings_collection.find_one({"chat_id": chat_id})
+        return doc["enabled"] if doc and "enabled" in doc else True  # default ON
+    except Exception as e:
+        print(f"Error getting clean_joinleft for {chat_id}: {e}")
+        return True  # safe default ON
