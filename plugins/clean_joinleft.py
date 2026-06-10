@@ -23,10 +23,7 @@ async def clean_joinleft(client: Client, message: Message):
         if bot_member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
             return
 
-        if bot_member.status == ChatMemberStatus.ADMINISTRATOR and not bot_member.can_delete_messages:
-            return
-
-        # Delete the join/left message
+        # Try to delete the join/left message
         await message.delete()
         print(f"Deleted join/left message in {chat_id}")
     except Exception as e:
@@ -38,10 +35,9 @@ async def set_clean_joinleft_global(client: Client, message: Message):
     """Owner or admin command to globally enable/disable clean join/left."""
     if len(message.command) != 2:
         await message.reply_text(
-            "<b>Usage:</b>\n"
-            "<code>/setcleanjoin on</code> - Enable auto-deletion of join/left messages\n"
-            "<code>/setcleanjoin off</code> - Disable auto-deletion",
-            parse_mode="HTML"
+            "Usage:\n"
+            "/setcleanjoin on - Enable auto-deletion of join/left messages\n"
+            "/setcleanjoin off - Disable auto-deletion"
         )
         return
 
@@ -50,20 +46,17 @@ async def set_clean_joinleft_global(client: Client, message: Message):
     if arg == "on":
         await set_global_clean_joinleft(True)
         await message.reply_text(
-            "✅ <b>Global clean join/left is now ENABLED</b>\n\n"
+            "✅ Global clean join/left is now ENABLED\n\n"
             "All join/left messages in groups will be deleted automatically.\n"
-            "Note: Bot must be admin with delete permission in each group.",
-            parse_mode="HTML"
+            "Note: Bot must be admin with delete permission in each group."
         )
     elif arg == "off":
         await set_global_clean_joinleft(False)
         await message.reply_text(
-            "❌ <b>Global clean join/left is now DISABLED</b>\n\n"
-            "Join/left messages will stay in groups.",
-            parse_mode="HTML"
+            "❌ Global clean join/left is now DISABLED\n\n"
+            "Join/left messages will stay in groups."
         )
     else:
         await message.reply_text(
-            "Invalid argument. Use <code>on</code> or <code>off</code>.",
-            parse_mode="HTML"
+            "Invalid argument. Use: /setcleanjoin on  or  /setcleanjoin off"
         )
