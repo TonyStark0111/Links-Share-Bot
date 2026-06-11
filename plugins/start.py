@@ -1,4 +1,3 @@
-
 import asyncio
 import base64
 import time
@@ -662,6 +661,157 @@ async def cb_handler(client: Bot, query: CallbackQuery):
             "sᴇʟᴇᴄᴛ ᴀ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴛᴏɢɢʟᴇ ɪᴛs ғᴏʀᴄᴇ-sᴜʙ ᴍᴏᴅᴇ:",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
+
+
+# ==================== GROUP BROADCAST ====================
+
+@Bot.on_message(filters.command('grp_broadcast') & filters.private & is_owner_or_admin)
+async def group_broadcast(client: Bot, message: Message):
+    await _broadcast_to_chats(client, message, chat_type="group")
+
+# ==================== CHANNEL BROADCAST ====================
+
+@Bot.on_message(filters.command('channel_broadcast') & filters.private & is_owner_or_admin)
+async def channel_broadcast(client: Bot, message: Message):
+    await _broadcast_to_chats(client, message, chat_type="channel")
+
+# Core broadcast function
+async def _broadcast_to_chats(client: Bot, message: Message, chat_type: str):
+    global is_canceled
+    args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+
+    if not message.reply_to_message:
+        msg = await message.reply(
+            f"<b>Reply to a message to broadcast.</b>\n\n"
+            f"<code>/{chat_type}_broadcast</code> - Broadcast to all {chat_type}s bot is in\n"
+            f"<code>/{chat_type}_broadcast db</code> - Broadcast to {chat_type}s stored in DB\n"
+            f"<code>/{chat_type}_broadcast db pin</code> - Broadcast & Pin\n"
+            f"<code>/{chat_type}_broadcast db delete 30</code> - Broadcast & auto-delete after 30s\n"
+            f"<code>/{chat_type}_broadcast db silent</code> - Broadcast without notification sound"
+        )
+        await asyncio.sleep(8)
+        return await msg.delete()
+
+    # Parse flags
+    use_db = False
+    do_pin = False
+    do_delete = False
+    duration = 0
+    silent = False
+    mode_text = []
+
+    for arg in args:
+        if arg.lower() == "db":
+            use_db = True
+            mode_text.append("DB")
+        elif arg.lower() == "pin":
+            do_pin = True
+            mode_text.append("PIN")
+        elif arg.lower() == "delete":
+            do_delete = True
+            idx = args.index(arg)
+            if idx + 1 < len(args) and args[idx+1].isdigit():
+                duration = int(args[idx+1])
+                mode_text.append(f"DELETE({duration}s)")
+            else:
+                return await message.reply("Provide valid duration after 'delete'.")
+        elif arg.lower() == "silent":
+            silent = True
+            mode_text.append("SILENT")
+
+    if not mode_text:
+        mode_text.append("GLOBAL")
+
+    # Reset cancel flag
+    async with cancel_lock:
+        is_canceled = False
+
+    # Get target chat IDs
+    if use_db:
+        if chat_type == "group":
+            targets = await get_groups()
+            source_desc = f"database-stored groups ({len(targets)})"
+        else:
+            targets = await get_channels()
+            source_desc = f"database-stored channels ({len(targets)})"
+    else:
+        if chat_type == "group":
+            targets = await get_all_bot_groups(client)
+            source_desc = f"all groups bot is in ({len(targets)})"
+        else:
+            targets = await get_all_bot_channels(client)
+            source_desc = f"all channels bot is admin in ({len(targets)})"
+
+    if not targets:
+        return await message.reply_text(f"❌ No {chat_type}s found to broadcast to.")
+
+    broadcast_msg = message.reply_to_message
+    total = len(targets)
+    successful = 0
+    failed = 0
+    pls_wait = await message.reply(f"<i>📢 Broadcasting to {source_desc} in {' + '.join(mode_text)} mode...</i>")
+
+    bar_length = 20
+    progress_bar = ''
+    last_update_percentage = 0
+    update_interval = 0.05
+
+    for i, chat_id in enumerate(targets, start=1):
+        async with cancel_lock:
+            if is_canceled:
+                await pls_wait.edit(f"❌ {chat_type.upper()} BROADCAST ({' + '.join(mode_text)}) CANCELED ❌")
+                return
+
+        try:
+            sent_msg = await broadcast_msg.copy(chat_id, disable_notification=silent)
+            if do_pin:
+                try:
+                    await client.pin_chat_message(chat_id, sent_msg.id, both_sides=True)
+                except Exception:
+                    pass
+            if do_delete:
+                asyncio.create_task(auto_delete(sent_msg, duration))
+            successful += 1
+        except FloodWait as e:
+            await asyncio.sleep(e.x)
+            try:
+                sent_msg = await broadcast_msg.copy(chat_id, disable_notification=silent)
+                if do_pin:
+                    await client.pin_chat_message(chat_id, sent_msg.id, both_sides=True)
+                if do_delete:
+                    asyncio.create_task(auto_delete(sent_msg, duration))
+                successful += 1
+            except Exception:
+                failed += 1
+        except Exception:
+            failed += 1
+
+        # Progress update
+        percent = i / total
+        if percent - last_update_percentage >= update_interval or last_update_percentage == 0:
+            blocks = int(percent * bar_length)
+            progress_bar = "●" * blocks + "○" * (bar_length - blocks)
+            status = f"""<b>📢 {chat_type.upper()} BROADCAST ({' + '.join(mode_text)}) IN PROGRESS...
+
+<blockquote>⏳:</b> [{progress_bar}] <code>{percent:.0%}</code></blockquote>
+
+<b>📊 Total {chat_type}s: <code>{total}</code>
+✅ Successful: <code>{successful}</code>
+❌ Failed: <code>{failed}</code></b>
+
+<i>⛔ To stop: <b>/cancel</b></i>"""
+            await pls_wait.edit(status)
+            last_update_percentage = percent
+
+    final_status = f"""<b>✅ {chat_type.upper()} BROADCAST ({' + '.join(mode_text)}) COMPLETED ✅
+
+<blockquote>📊:</b> [{progress_bar}] {percent:.0%}</blockquote>
+
+<b>📊 Total {chat_type}s: <code>{total}</code>
+✅ Successful: <code>{successful}</code>
+❌ Failed: <code>{failed}</code></b>"""
+    await pls_wait.edit(final_status)
+
 
 def delete_after_delay(msg, delay):
     async def inner():
