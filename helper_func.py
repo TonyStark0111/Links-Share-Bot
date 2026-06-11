@@ -1,4 +1,4 @@
-# +++ Modified By Yato [telegram username: @i_killed_my_clan & @ProYato] +++ # aNDI BANDI SANDI JISNE BHI CREDIT HATAYA USKI BANDI RAndi 
+# +++ Modified By Yato [telegram username: @i_killed_my_clan & @ProYato] +++
 import base64
 import re
 import asyncio
@@ -58,3 +58,40 @@ def get_readable_time(seconds: int) -> str:
     time_list.reverse()
     up_time += ":".join(time_list)
     return up_time
+
+
+# ============ HELPER FUNCTIONS FOR BROADCAST (NEW) ============
+
+async def get_all_bot_groups(client):
+    """Return list of group/supergroup IDs where bot is a member."""
+    groups = []
+    try:
+        async for dialog in client.get_dialogs():
+            chat = dialog.chat
+            if chat.type in ["group", "supergroup"]:
+                try:
+                    member = await client.get_chat_member(chat.id, (await client.get_me()).id)
+                    if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
+                        groups.append(chat.id)
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"Error getting bot groups: {e}")
+    return groups
+
+async def get_all_bot_channels(client):
+    """Return list of channel IDs where bot is an administrator."""
+    channels = []
+    try:
+        async for dialog in client.get_dialogs():
+            chat = dialog.chat
+            if chat.type == "channel":
+                try:
+                    member = await client.get_chat_member(chat.id, (await client.get_me()).id)
+                    if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
+                        channels.append(chat.id)
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"Error getting bot channels: {e}")
+    return channels
