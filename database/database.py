@@ -385,3 +385,29 @@ async def is_approval_off(channel_id: int) -> bool:
     except Exception as e:
         print(f"Error checking approval_off for channel {channel_id}: {e}")
         return False
+
+# ============ CLEAN JOINLEFT SETTINGS ============
+
+async def get_global_clean_joinleft() -> bool:
+    """Get global clean join/left setting."""
+    try:
+        settings_collection = database['settings']
+        setting = await settings_collection.find_one({'_id': 'global_clean_joinleft'})
+        return setting.get('value', False) if setting else False
+    except Exception as e:
+        print(f"Error getting global clean joinleft: {e}")
+        return False
+
+async def set_global_clean_joinleft(value: bool) -> bool:
+    """Set global clean join/left setting."""
+    try:
+        settings_collection = database['settings']
+        await settings_collection.update_one(
+            {'_id': 'global_clean_joinleft'},
+            {'$set': {'value': value}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        print(f"Error setting global clean joinleft: {e}")
+        return False
