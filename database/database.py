@@ -1,4 +1,3 @@
-
 import motor.motor_asyncio
 import base64
 from config import DB_URI, DB_NAME
@@ -12,6 +11,8 @@ database = dbclient[DB_NAME]
 user_data = database['users']
 channels_collection = database['channels']
 fsub_channels_collection = database['fsub_channels']
+groups_collection = database['groups']  # New collection for groups
+
 
 async def add_user(user_id: int) -> bool:
     """Add a user to the database if they don't exist."""
@@ -58,7 +59,7 @@ async def is_admin(user_id: int) -> bool:
     """Check if a user is an admin."""
     admins_collection = database['admins']
     try:
-        user_id = int(user_id)  # Ensure always int
+        user_id = int(user_id)
         return bool(await admins_collection.find_one({'_id': user_id}))
     except Exception as e:
         print(f"Error checking admin status for {user_id}: {e}")
@@ -68,7 +69,7 @@ async def add_admin(user_id: int) -> bool:
     """Add a user as admin."""
     admins_collection = database['admins']
     try:
-        user_id = int(user_id)  # Ensure always int
+        user_id = int(user_id)
         await admins_collection.update_one({'_id': user_id}, {'$set': {'_id': user_id}}, upsert=True)
         return True
     except Exception as e:
@@ -94,6 +95,46 @@ async def list_admins() -> list:
     except Exception as e:
         print(f"Error listing admins: {e}")
         return []
+
+
+# ============ GROUP MANAGEMENT (NEW) ============
+
+async def add_group(group_id: int) -> bool:
+    """Add a group ID to the broadcast list."""
+    try:
+        await groups_collection.update_one({'_id': group_id}, {'$set': {'_id': group_id}}, upsert=True)
+        return True
+    except Exception as e:
+        print(f"Error adding group {group_id}: {e}")
+        return False
+
+async def remove_group(group_id: int) -> bool:
+    """Remove a group ID from the broadcast list."""
+    try:
+        result = await groups_collection.delete_one({'_id': group_id})
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"Error removing group {group_id}: {e}")
+        return False
+
+async def get_groups() -> List[int]:
+    """Get all group IDs from the broadcast list."""
+    try:
+        docs = groups_collection.find()
+        return [doc['_id'] async for doc in docs]
+    except Exception as e:
+        print(f"Error fetching groups: {e}")
+        return []
+
+async def is_group_in_db(group_id: int) -> bool:
+    """Check if a group exists in the broadcast list."""
+    try:
+        return bool(await groups_collection.find_one({'_id': group_id}))
+    except Exception:
+        return False
+
+
+# ============ CHANNEL MANAGEMENT ============
 
 async def save_channel(channel_id: int) -> bool:
     """Save a channel to the database with invite link expiration."""
@@ -343,30 +384,4 @@ async def is_approval_off(channel_id: int) -> bool:
         return bool(channel and channel.get("approval_off", False))
     except Exception as e:
         print(f"Error checking approval_off for channel {channel_id}: {e}")
-        return False
-
-# Global setting for clean join/left messages
-# Global setting for clean join/left messages
-global_settings_collection = database['global_settings']
-
-async def set_global_clean_joinleft(enabled: bool) -> bool:
-    """Set global clean join/left feature on/off."""
-    try:
-        await global_settings_collection.update_one(
-            {"_id": "clean_joinleft"},
-            {"$set": {"enabled": enabled, "updated_at": datetime.utcnow()}},
-            upsert=True
-        )
-        return True
-    except Exception as e:
-        print(f"Error setting global clean_joinleft: {e}")
-        return False
-
-async def get_global_clean_joinleft() -> bool:
-    """Get global clean join/left status. Default: False (off)."""
-    try:
-        doc = await global_settings_collection.find_one({"_id": "clean_joinleft"})
-        return doc["enabled"] if doc and "enabled" in doc else False
-    except Exception as e:
-        print(f"Error getting global clean_joinleft: {e}")
         return False
