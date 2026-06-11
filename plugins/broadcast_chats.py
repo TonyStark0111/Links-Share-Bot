@@ -4,7 +4,7 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from database.database import full_userbase, del_user
+from database.database import full_userbase, del_user, channels_collection
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 from helper_func import is_owner_or_admin
 
@@ -21,30 +21,56 @@ async def channel_broadcast_command(client: Client, message: Message):
     """Broadcast to channels where bot is admin."""
     await broadcast_menu(client, message, chat_type="channel")
 
+async def get_admin_chats(client: Client, chat_type: str):
+    """Get all groups/channels where bot is admin by checking recent updates."""
+    admin_chats = []
+    
+    # Method 1: Get from database where bot was added
+    try:
+        db_channels = await channels_collection.find({"status": "active"}).to_list(None)
+        for channel in db_channels:
+            chat_id = channel.get("channel_id")
+            if not chat_id:
+                continue
+            
+            # Determine chat type from ID
+            is_group = str(chat_id).startswith("-100")  # Supergroup/channel IDs start with -100
+            is_channel = str(chat_id).startswith("-100")  # Both use same format
+            is_small_group = str(chat_id).startswith("-") and not str(chat_id).startswith("-100")
+            
+            if chat_type == "group" and (is_group or is_small_group):
+                try:
+                    # Check if bot is admin
+                    bot_member = await client.get_chat_member(chat_id, (await client.get_me()).id)
+                    if bot_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                        chat = await client.get_chat(chat_id)
+                        admin_chats.append(chat)
+                except Exception:
+                    continue
+            elif chat_type == "channel" and is_channel:
+                try:
+                    # Check if bot is admin
+                    bot_member = await client.get_chat_member(chat_id, (await client.get_me()).id)
+                    if bot_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                        chat = await client.get_chat(chat_id)
+                        admin_chats.append(chat)
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"Error getting admin chats from DB: {e}")
+    
+    return admin_chats
+
 async def broadcast_menu(client: Client, message: Message, chat_type: str):
     """Show list of groups/channels where bot is admin."""
     user_id = message.from_user.id
-    dialogs = client.get_dialogs()
-    admin_chats = []
     
     status_msg = await message.reply("🔄 Fetching chats where I am admin...")
     
-    async for dialog in dialogs:
-        chat = dialog.chat
-        if chat_type == "group" and chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
-            continue
-        if chat_type == "channel" and chat.type != ChatType.CHANNEL:
-            continue
-        
-        try:
-            bot_member = await client.get_chat_member(chat.id, (await client.get_me()).id)
-            if bot_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-                admin_chats.append(chat)
-        except Exception:
-            continue
+    admin_chats = await get_admin_chats(client, chat_type)
     
     if not admin_chats:
-        await status_msg.edit(f"❌ No {chat_type}s found where I am admin.")
+        await status_msg.edit(f"❌ No {chat_type}s found where I am admin.\n\nMake sure:\n1. Bot is added as admin in {chat_type}\n2. {chat_type} is saved in database (use /addchannel for channels)")
         return
     
     broadcast_sessions[user_id] = {
@@ -160,7 +186,7 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             "`text | url`  - for URL button\n"
             "`text | alert:callback_data` - for callback button (shows alert on click)\n\n"
             "Example:\n"
-            "`Visit Google | https://google.com`\n"
+            "`Google | https://google.com`\n"
             "`Click Me | alert:button_clicked`\n\n"
             "Send /done when finished adding buttons.\n"
             "Send /cancel_buttons to cancel adding."
@@ -168,9 +194,6 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
         await query.answer()
     
     elif data == "bc_done_buttons":
-        if not session.get("buttons"):
-            await query.answer("No buttons added. Use /cancel_buttons to skip.", show_alert=True)
-            return
         await send_broadcast_with_buttons(client, query.message, user_id, session)
         await query.answer()
     
@@ -224,9 +247,9 @@ async def send_broadcast_with_buttons(client: Client, msg: Message, user_id: int
     reply_markup = None
     if not skip_buttons and session.get("buttons"):
         buttons = []
-        for btn in session["buttons"]:
+        for btn_row in session["buttons"]:
             row = []
-            for b in btn:
+            for b in btn_row:
                 if b["type"] == "url":
                     row.append(InlineKeyboardButton(b["text"], url=b["value"]))
                 else:  # alert callback
@@ -267,7 +290,8 @@ async def send_broadcast_with_buttons(client: Client, msg: Message, user_id: int
                 successful += 1
             except Exception:
                 failed += 1
-        except Exception:
+        except Exception as e:
+            print(f"Failed to send to {chat.id}: {e}")
             failed += 1
         
         if i % 5 == 0 or i == total:
@@ -281,7 +305,7 @@ async def send_broadcast_with_buttons(client: Client, msg: Message, user_id: int
         f"Failed: {failed}"
     )
     if session.get("buttons"):
-        final_text += f"\n\nButtons: {len(session['buttons'])} button(s) added."
+        final_text += f"\n\nButtons: {len(session['buttons'])} button row(s) added."
     await status_msg.edit(final_text)
     del broadcast_sessions[user_id]
 
@@ -304,18 +328,17 @@ async def handle_broadcast_content_and_buttons(client: Client, message: Message)
         btn_value = parts[1].strip()
         
         btn_type = "url" if btn_value.startswith("http://") or btn_value.startswith("https://") else "alert"
-        if btn_type == "alert" and not btn_value.startswith("alert:"):
-            # Allow custom callback data without alert prefix? We'll assume alert for simplicity
-            btn_value = f"alert:{btn_value}"
+        if btn_type == "alert" and btn_value.startswith("alert:"):
+            btn_value = btn_value.replace("alert:", "")
         
         # Store button as a dict
         if "buttons" not in session:
             session["buttons"] = []
-        # Add to current row or new row? For simplicity, each message adds a new row.
+        # Each message adds a new row with one button (can be extended for multiple buttons per row)
         session["buttons"].append([{
             "text": btn_text,
             "type": btn_type,
-            "value": btn_value if btn_type == "url" else btn_value.replace("alert:", "")
+            "value": btn_value
         }])
         
         await message.reply(f"✅ Button added: `{btn_text}` ({btn_type})\nSend another button or /done to finish, /cancel_buttons to abort.")
@@ -341,16 +364,8 @@ async def done_buttons(client: Client, message: Message):
     user_id = message.from_user.id
     session = broadcast_sessions.get(user_id)
     if session and session.get("building_buttons"):
-        # Finish button building
         session["building_buttons"] = False
-        await message.reply("Button creation finished. Proceeding to broadcast...")
-        # Now send broadcast with buttons (need to get original message context)
-        # We don't have the original menu message here, so we'll ask user to re-send content? 
-        # Instead, store a flag and use the last message reference.
-        # Simpler: user will see a callback after /done from the previous inline menu.
-        # We'll rely on the callback handler to do the broadcast.
-        # So just acknowledge.
-        await message.reply("Use the inline menu to finalize broadcast.")
+        await message.reply("Button creation finished. Use the inline menu to finalize broadcast.")
     else:
         await message.reply("No active button creation session.")
 
