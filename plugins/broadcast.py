@@ -11,12 +11,9 @@ from database.database import (
 # Store user sessions
 user_data = {}
 
-# ============ GROUP BROADCAST ============
-
 @Client.on_message(filters.command("grp_broadcast") & filters.private & is_owner_or_admin)
 async def grp_broadcast_cmd(client: Client, message: Message):
     groups = await get_global_groups()
-    
     if not groups:
         await message.reply("❌ No groups found.\n\nAdd a group with: /addgroup 96022547")
         return
@@ -30,12 +27,9 @@ async def grp_broadcast_cmd(client: Client, message: Message):
     
     await send_menu(client, message.chat.id, message.from_user.id)
 
-# ============ CHANNEL BROADCAST ============
-
 @Client.on_message(filters.command("channel_broadcast") & filters.private & is_owner_or_admin)
 async def channel_broadcast_cmd(client: Client, message: Message):
     channels = await get_global_channels()
-    
     if not channels:
         await message.reply("❌ No channels found.\n\nAdd a channel with: /addchannel 96022547")
         return
@@ -48,8 +42,6 @@ async def channel_broadcast_cmd(client: Client, message: Message):
     }
     
     await send_menu(client, message.chat.id, message.from_user.id)
-
-# ============ SEND MENU ============
 
 async def send_menu(client: Client, chat_id: int, user_id: int, edit_msg_id: int = None):
     session = user_data.get(user_id)
@@ -70,15 +62,15 @@ async def send_menu(client: Client, chat_id: int, user_id: int, edit_msg_id: int
             name = f"ID: {item_id}"
         
         is_selected = "✅" if item_id in session["selected"] else "⬜"
-        buttons.append([InlineKeyboardButton(f"{is_selected} {name}", callback_data=f"toggle_{item_id}")])
+        buttons.append([InlineKeyboardButton(f"{is_selected} {name}", callback_data=f"bc_toggle_{item_id}")])
     
     selected_count = len(session["selected"])
-    buttons.append([InlineKeyboardButton(f"📢 Send to Selected ({selected_count})", callback_data="send_selected")])
-    buttons.append([InlineKeyboardButton(f"📢 Send to ALL ({len(items)})", callback_data="send_all")])
-    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
-    buttons.append([InlineKeyboardButton(f"➕ Add {item_type.capitalize()}", callback_data="add_item")])
-    buttons.append([InlineKeyboardButton(f"🗑️ Remove {item_type.capitalize()}", callback_data="remove_item")])
-    buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data="refresh")])
+    buttons.append([InlineKeyboardButton(f"📢 Send to Selected ({selected_count})", callback_data="bc_selected")])
+    buttons.append([InlineKeyboardButton(f"📢 Send to ALL ({len(items)})", callback_data="bc_all")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel")])
+    buttons.append([InlineKeyboardButton(f"➕ Add {item_type.capitalize()}", callback_data="bc_add")])
+    buttons.append([InlineKeyboardButton(f"🗑️ Remove {item_type.capitalize()}", callback_data="bc_remove")])
+    buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data="bc_refresh")])
     
     text = f"**📡 SELECT {type_upper}S TO BROADCAST**\n\n"
     text += f"Selected: {selected_count} | Total: {len(items)}\n\n"
@@ -109,12 +101,11 @@ async def send_menu(client: Client, chat_id: int, user_id: int, edit_msg_id: int
 
 # ============ CALLBACK HANDLER ============
 
-@Client.on_callback_query(filters.regex(r"^broad_"))
+@Client.on_callback_query(filters.regex(r"^bc_"))
 async def broadcast_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
     
-    # Check if user has session
     if user_id not in user_data:
         await query.answer("Session expired! Send /grp_broadcast or /channel_broadcast again.", show_alert=True)
         return
@@ -123,60 +114,55 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
     item_type = session["type"]
     
     # Handle toggle selection
-    if data.startswith("toggle_"):
-        item_id = int(data.split("_")[1])
+    if data.startswith("bc_toggle_"):
+        item_id = int(data.split("_")[2])
         if item_id in session["selected"]:
             session["selected"].remove(item_id)
             await query.answer("Removed from selection")
         else:
             session["selected"].add(item_id)
             await query.answer("Added to selection")
-        
         await send_menu(client, query.message.chat.id, user_id)
         return
     
     # Handle send selected
-    elif data == "send_selected":
+    elif data == "bc_selected":
         if not session["selected"]:
-            await query.answer(f"No {item_type}s selected! Click on items to select them.", show_alert=True)
+            await query.answer(f"No {item_type}s selected!", show_alert=True)
             return
-        
         session["targets"] = list(session["selected"])
         session["step"] = "waiting_content"
         session["send_type"] = "selected"
-        
         await query.message.edit_text(
             f"**📢 BROADCAST TO SELECTED {item_type.upper()}S**\n\n"
             f"Selected: {len(session['selected'])} {item_type}(s)\n\n"
             f"**Send me the message to broadcast.**\n"
-            f"Supports: Text, Photos, Videos, Documents, etc.\n\n"
             f"Send `/cancel` to abort."
         )
         await query.answer()
     
     # Handle send all
-    elif data == "send_all":
+    elif data == "bc_all":
         session["targets"] = session["items"].copy()
         session["step"] = "waiting_content"
         session["send_type"] = "all"
-        
         await query.message.edit_text(
             f"**📢 BROADCAST TO ALL {item_type.upper()}S**\n\n"
             f"Total: {len(session['items'])} {item_type}(s)\n\n"
             f"**Send me the message to broadcast.**\n"
-            f"Supports: Text, Photos, Videos, Documents, etc.\n\n"
             f"Send `/cancel` to abort."
         )
         await query.answer()
     
     # Handle cancel
-    elif data == "cancel":
-        del user_data[user_id]
+    elif data == "bc_cancel":
+        if user_id in user_data:
+            del user_data[user_id]
         await query.message.edit_text("❌ Broadcast cancelled.")
         await query.answer()
     
     # Handle refresh
-    elif data == "refresh":
+    elif data == "bc_refresh":
         if item_type == "group":
             session["items"] = await get_global_groups()
         else:
@@ -186,7 +172,7 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
         await query.answer("List refreshed!", show_alert=True)
     
     # Handle add item
-    elif data == "add_item":
+    elif data == "bc_add":
         session["step"] = "waiting_add"
         await query.message.edit_text(
             f"**➕ ADD NEW {item_type.upper()}**\n\n"
@@ -197,7 +183,7 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
         await query.answer()
     
     # Handle remove item
-    elif data == "remove_item":
+    elif data == "bc_remove":
         items = session["items"]
         if not items:
             await query.answer(f"No {item_type}s to remove!", show_alert=True)
@@ -210,9 +196,9 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
                 name = chat.title[:25]
             except:
                 name = f"ID: {item_id}"
-            buttons.append([InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_confirm_{item_id}")])
+            buttons.append([InlineKeyboardButton(f"❌ {name}", callback_data=f"bc_remove_confirm_{item_id}")])
         
-        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="back_to_menu")])
+        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="bc_back")])
         
         await query.message.edit_text(
             f"**🗑️ REMOVE {item_type.upper()}**\n\nClick on an item to remove it:",
@@ -221,8 +207,8 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
         await query.answer()
     
     # Handle confirm remove
-    elif data.startswith("remove_confirm_"):
-        item_id = int(data.split("_")[2])
+    elif data.startswith("bc_remove_confirm_"):
+        item_id = int(data.split("_")[3])
         if item_type == "group":
             await remove_global_group(item_id)
             session["items"] = await get_global_groups()
@@ -234,18 +220,18 @@ async def broadcast_callback_handler(client: Client, query: CallbackQuery):
         await query.answer(f"{item_type.capitalize()} removed!", show_alert=True)
     
     # Handle back to menu
-    elif data == "back_to_menu":
+    elif data == "bc_back":
         session["step"] = "menu"
         await send_menu(client, query.message.chat.id, user_id)
         await query.answer()
     
     # Handle confirm broadcast
-    elif data == "confirm_broadcast":
+    elif data == "bc_confirm":
         await execute_broadcast(client, query)
 
 # ============ HANDLE USER INPUT ============
 
-@Client.on_message(filters.private & ~filters.command(["cancel", "grp_broadcast", "channel_broadcast"]))
+@Client.on_message(filters.private & ~filters.command(["cancel", "grp_broadcast", "channel_broadcast", "addgroup", "addchannel", "listgroups", "listchannels", "delgroup", "delchannel", "addch", "delch", "channels", "links", "reqlink", "bulklink", "stats", "status", "broadcast", "help", "about"]))
 async def handle_input(client: Client, message: Message):
     user_id = message.from_user.id
     
@@ -294,8 +280,8 @@ async def handle_input(client: Client, message: Message):
         session["step"] = "confirm"
         
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data="confirm_broadcast")],
-            [InlineKeyboardButton("❌ No, Cancel", callback_data="cancel")]
+            [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data="bc_confirm")],
+            [InlineKeyboardButton("❌ No, Cancel", callback_data="bc_cancel")]
         ])
         
         await message.reply(
@@ -362,7 +348,6 @@ async def execute_broadcast(client: Client, query: CallbackQuery):
                 f"{i}/{total} completed."
             )
     
-    # Final result with progress bar
     bar_length = 20
     progress_bar = "●" * bar_length
     
@@ -377,7 +362,6 @@ async def execute_broadcast(client: Client, query: CallbackQuery):
     
     await query.message.edit_text(result)
     
-    # Cleanup
     if user_id in user_data:
         del user_data[user_id]
     await query.answer("Broadcast completed!")
