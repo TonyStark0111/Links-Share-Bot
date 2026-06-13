@@ -543,7 +543,7 @@ async def monitor_messages(client: Bot, message: Message):
 
 """
 
-@Bot.on_callback_query()
+@Bot.on_callback_query(filters.regex(r"^(close|about|channels|start|home|rfs_ch_|rfs_toggle_|fsub_back|check_sub)$"))
 async def cb_handler(client: Bot, query: CallbackQuery):
     data = query.data  
     chat_id = query.message.chat.id
