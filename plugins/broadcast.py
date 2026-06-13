@@ -1,35 +1,30 @@
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, MessageIdInvalid
 from helper_func import is_owner_or_admin
 from database.database import (
     get_global_groups, add_global_group, remove_global_group,
     get_global_channels, add_global_channel, remove_global_channel
 )
 
-# Store active sessions
 broadcast_sessions = {}
 
 # ============ COMMAND HANDLERS ============
 
 @Client.on_message(filters.command("grp_broadcast") & filters.private & is_owner_or_admin)
 async def group_broadcast_menu(client: Client, message: Message):
-    """Show list of groups to choose from"""
     await show_broadcast_menu(client, message, chat_type="group")
 
 @Client.on_message(filters.command("channel_broadcast") & filters.private & is_owner_or_admin)
 async def channel_broadcast_menu(client: Client, message: Message):
-    """Show list of channels to choose from"""
     await show_broadcast_menu(client, message, chat_type="channel")
 
 # ============ CORE MENU FUNCTION ============
 
 async def show_broadcast_menu(client: Client, message: Message, chat_type: str):
-    """Display paginated list of groups or channels with checkboxes"""
     user_id = message.from_user.id
     
-    # Get appropriate list from database
     if chat_type == "group":
         items = await get_global_groups()
         item_name = "groups"
@@ -46,7 +41,9 @@ async def show_broadcast_menu(client: Client, message: Message, chat_type: str):
         )
         return
     
-    # Store session
+    # Send a new message for the menu (do not edit the command message)
+    menu_msg = await message.reply("Loading...")
+    
     broadcast_sessions[user_id] = {
         "type": chat_type,
         "items": items,
@@ -55,13 +52,13 @@ async def show_broadcast_menu(client: Client, message: Message, chat_type: str):
         "awaiting_content": False,
         "content_msg": None,
         "broadcast_all": False,
-        "awaiting_input": False
+        "awaiting_input": False,
+        "menu_message": menu_msg
     }
     
-    await show_item_list(client, message, user_id)
+    await show_item_list(client, menu_msg, user_id, edit=True)
 
-async def show_item_list(client: Client, message: Message, user_id: int, edit: bool = True):
-    """Display paginated list with checkboxes"""
+async def show_item_list(client: Client, msg: Message, user_id: int, edit: bool = True):
     session = broadcast_sessions.get(user_id)
     if not session:
         return
@@ -78,13 +75,11 @@ async def show_item_list(client: Client, message: Message, user_id: int, edit: b
     
     buttons = []
     
-    # Add item buttons with checkboxes
     for item_id in page_items:
         try:
             chat = await client.get_chat(item_id)
             title = chat.title[:35] + ".." if len(chat.title) > 35 else chat.title
             
-            # Show member count for groups
             if chat_type == "group":
                 member_count = getattr(chat, 'members_count', '?')
                 display = f"{title} ({member_count})"
@@ -104,7 +99,6 @@ async def show_item_list(client: Client, message: Message, user_id: int, edit: b
                 callback_data=f"bc_toggle_{chat_type}_{item_id}"
             )])
     
-    # Navigation buttons
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"bc_page_prev_{chat_type}"))
@@ -113,7 +107,6 @@ async def show_item_list(client: Client, message: Message, user_id: int, edit: b
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Action buttons
     action_buttons = []
     if session["selected_items"]:
         action_buttons.append(InlineKeyboardButton(
@@ -127,14 +120,12 @@ async def show_item_list(client: Client, message: Message, user_id: int, edit: b
     action_buttons.append(InlineKeyboardButton("❌ Cancel", callback_data=f"bc_cancel_{chat_type}"))
     buttons.append(action_buttons)
     
-    # Management buttons
     buttons.append([
         InlineKeyboardButton(f"➕ Add {chat_type.capitalize()}", callback_data=f"bc_add_{chat_type}"),
         InlineKeyboardButton(f"🗑️ Remove {chat_type.capitalize()}", callback_data=f"bc_remove_{chat_type}"),
         InlineKeyboardButton("🔄 Refresh", callback_data=f"bc_refresh_{chat_type}")
     ])
     
-    # Create message text
     selected_count = len(session["selected_items"])
     text = f"**📡 SELECT {chat_type.upper()}S TO BROADCAST**\n\n"
     text += f"Selected: **{selected_count}** {chat_type}(s)\n"
@@ -149,13 +140,15 @@ async def show_item_list(client: Client, message: Message, user_id: int, edit: b
     
     reply_markup = InlineKeyboardMarkup(buttons)
     
-    if edit and hasattr(message, 'edit_text'):
-        await message.edit_text(text, reply_markup=reply_markup)
+    if edit:
+        try:
+            await msg.edit_text(text, reply_markup=reply_markup)
+        except (MessageIdInvalid, Exception):
+            # If edit fails, send a new message and update session
+            new_msg = await msg.reply(text, reply_markup=reply_markup)
+            session["menu_message"] = new_msg
     else:
-        if edit:
-            await message.edit_text(text, reply_markup=reply_markup)
-        else:
-            await message.reply_text(text, reply_markup=reply_markup)
+        await msg.reply_text(text, reply_markup=reply_markup)
 
 # ============ CALLBACK HANDLERS ============
 
@@ -181,18 +174,18 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             session["selected_items"].remove(item_id)
         else:
             session["selected_items"].append(item_id)
-        await show_item_list(client, query.message, user_id)
+        await show_item_list(client, session["menu_message"], user_id, edit=True)
         await query.answer()
     
     # Handle pagination
     elif action == "page_prev" and chat_type:
         session["page"] -= 1
-        await show_item_list(client, query.message, user_id)
+        await show_item_list(client, session["menu_message"], user_id, edit=True)
         await query.answer()
     
     elif action == "page_next" and chat_type:
         session["page"] += 1
-        await show_item_list(client, query.message, user_id)
+        await show_item_list(client, session["menu_message"], user_id, edit=True)
         await query.answer()
     
     # Handle refresh
@@ -201,7 +194,7 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             session["items"] = await get_global_groups()
         else:
             session["items"] = await get_global_channels()
-        await show_item_list(client, query.message, user_id)
+        await show_item_list(client, session["menu_message"], user_id, edit=True)
         await query.answer(f"{chat_type.capitalize()} list refreshed!", show_alert=True)
     
     # Handle broadcast selected
@@ -214,10 +207,7 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
         await query.message.edit_text(
             f"**📢 BROADCAST TO SELECTED {chat_type.upper()}S**\n\n"
             f"Selected: **{len(session['selected_items'])}**\n\n"
-            f"IDs:\n"
-            + "\n".join(f"`{iid}`" for iid in session["selected_items"][:10])
-            + (f"\n... and {len(session['selected_items']) - 10} more" if len(session["selected_items"]) > 10 else "")
-            + f"\n\n**Send me the message to broadcast.**\n"
+            f"**Send me the message to broadcast.**\n"
             f"Supports: Text, Photos, Videos, Documents, etc.\n\n"
             f"Send `/cancel` to abort."
         )
@@ -249,8 +239,6 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             f"**➕ ADD NEW {chat_type.upper()}**\n\n"
             f"Send the {chat_type} ID to add:\n"
             f"Example: `-1001234567890`\n\n"
-            f"Or send the username: `@{chat_type}username`\n\n"
-            f"Make sure bot is {'member' if chat_type == 'group' else 'admin'} in that {chat_type}.\n\n"
             f"Send `/cancel` to abort."
         )
         session["awaiting_input"] = True
@@ -295,7 +283,6 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             success = await remove_global_channel(item_id)
         
         if success:
-            # Update session items
             if chat_type == "group":
                 session["items"] = await get_global_groups()
             else:
@@ -303,13 +290,13 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             if item_id in session["selected_items"]:
                 session["selected_items"].remove(item_id)
             await query.answer(f"✅ {chat_type.capitalize()} {item_id} removed!", show_alert=True)
-            await show_item_list(client, query.message, user_id)
+            await show_item_list(client, session["menu_message"], user_id, edit=True)
         else:
             await query.answer(f"Failed to remove {chat_type}!", show_alert=True)
     
     # Handle back to list
     elif action == "back_to_list" and chat_type:
-        await show_item_list(client, query.message, user_id)
+        await show_item_list(client, session["menu_message"], user_id, edit=True)
         await query.answer()
     
     # Handle start broadcast
@@ -328,56 +315,44 @@ async def handle_broadcast_input(client: Client, message: Message):
     
     chat_type = session["type"]
     
-    # Handle adding item via ID/username
+    # Handle adding item via ID
     if session.get("awaiting_input"):
         input_text = message.text.strip()
         
         try:
             if input_text.startswith("-100") or input_text.lstrip("-").isdigit():
                 item_id = int(input_text)
-            elif input_text.startswith("@"):
-                chat = await client.get_chat(input_text)
-                item_id = chat.id
             else:
-                await message.reply(f"❌ Invalid format. Send {chat_type} ID or username.\nExample: `-1001234567890` or `@{chat_type}`")
+                await message.reply(f"❌ Invalid format. Send {chat_type} ID.\nExample: `-1001234567890`")
                 return
             
-            # Add to database
             if chat_type == "group":
                 success = await add_global_group(item_id)
             else:
                 success = await add_global_channel(item_id)
             
             if success:
-                # Update session
                 if chat_type == "group":
                     session["items"] = await get_global_groups()
                 else:
                     session["items"] = await get_global_channels()
                 session["awaiting_input"] = False
                 await message.reply(f"✅ {chat_type.capitalize()} `{item_id}` added successfully!")
-                await show_item_list(client, message, user_id)
+                await show_item_list(client, session["menu_message"], user_id, edit=True)
             else:
                 await message.reply(f"❌ Failed to add {chat_type}. It may already exist.")
                 session["awaiting_input"] = False
-                await show_item_list(client, message, user_id)
+                await show_item_list(client, session["menu_message"], user_id, edit=True)
         except Exception as e:
-            await message.reply(f"❌ Error: {e}\nMake sure bot is {'member' if chat_type == 'group' else 'admin'} in that {chat_type}.")
+            await message.reply(f"❌ Error: {e}")
             session["awaiting_input"] = False
-            await show_item_list(client, message, user_id)
+            await show_item_list(client, session["menu_message"], user_id, edit=True)
         return
     
     # Handle broadcast content
     if session.get("awaiting_content"):
         session["content_msg"] = message
         session["awaiting_content"] = False
-        
-        if session["broadcast_all"]:
-            targets = session["items"]
-            target_desc = f"ALL {len(targets)} {chat_type}s"
-        else:
-            targets = session["selected_items"]
-            target_desc = f"{len(targets)} selected {chat_type}s"
         
         confirm_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data=f"bc_start_broadcast_{chat_type}")],
@@ -387,7 +362,6 @@ async def handle_broadcast_input(client: Client, message: Message):
         
         await message.reply(
             f"**📢 BROADCAST READY**\n\n"
-            f"Target: {target_desc}\n\n"
             f"Content received!\n\n"
             f"**Do you want to start the broadcast?**",
             reply_markup=confirm_buttons
@@ -411,7 +385,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
     
     chat_type = session["type"]
     
-    # Get targets
     if session["broadcast_all"]:
         targets = session["items"]
         target_type = f"ALL {chat_type.upper()}S"
@@ -426,7 +399,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
     total = len(targets)
     bar_length = 20
     
-    # Initial progress message
     progress_bar = "○" * bar_length
     await query.message.edit_text(
         f"**🔄 {target_type} BROADCAST IN PROGRESS...**\n\n"
@@ -463,7 +435,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
             failed += 1
             failed_list.append(str(target_id))
         
-        # Update progress bar every 5 messages or at the end
         if i % 5 == 0 or i == total:
             percent = i / total
             percent_int = int(percent * 100)
@@ -479,7 +450,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
                 f"<i>⛔ To stop: <b>/cancel</b></i>"
             )
     
-    # Final status with full progress bar
     progress_bar = "●" * bar_length
     result_text = (
         f"**✅ {chat_type.upper()} BROADCAST COMPLETED ✅**\n\n"
@@ -496,116 +466,98 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
     
     await query.message.edit_text(result_text)
     
-    # Cleanup session
     if user_id in broadcast_sessions:
         del broadcast_sessions[user_id]
     await query.answer("Broadcast completed!")
 
-# ============ AUTO-ADD GROUPS (ONLY GROUPS, NOT CHANNELS) ============
+# ============ AUTO-ADD GROUPS ============
 
 @Client.on_message(filters.group)
 async def auto_add_group_to_global(client: Client, message: Message):
-    """Auto-add groups when bot receives any message"""
     await add_global_group(message.chat.id)
     print(f"Auto-added group {message.chat.id} to global broadcast list")
 
-# ============ QUICK COMMANDS FOR ADMINS ============
+# ============ QUICK COMMANDS ============
 
 @Client.on_message(filters.command("addgroup") & filters.private & is_owner_or_admin)
 async def quick_add_group(client: Client, message: Message):
     if len(message.command) != 2:
-        return await message.reply("Usage: /addgroup -1001234567890\nOr: /addgroup @groupusername")
-    await quick_add_item(client, message, "group")
+        return await message.reply("Usage: /addgroup -1001234567890")
+    try:
+        group_id = int(message.command[1])
+        if await add_global_group(group_id):
+            await message.reply(f"✅ Group `{group_id}` added to broadcast list.")
+        else:
+            await message.reply("❌ Failed to add group.")
+    except ValueError:
+        await message.reply("Invalid group ID.")
 
 @Client.on_message(filters.command("addchannel") & filters.private & is_owner_or_admin)
 async def quick_add_channel(client: Client, message: Message):
     if len(message.command) != 2:
-        return await message.reply("Usage: /addchannel -1001234567890\nOr: /addchannel @channelusername")
-    await quick_add_item(client, message, "channel")
-
-async def quick_add_item(client: Client, message: Message, item_type: str):
-    input_text = message.command[1]
+        return await message.reply("Usage: /addchannel -1001234567890")
     try:
-        if input_text.startswith("-100") or input_text.lstrip("-").isdigit():
-            item_id = int(input_text)
-        elif input_text.startswith("@"):
-            chat = await client.get_chat(input_text)
-            item_id = chat.id
+        channel_id = int(message.command[1])
+        if await add_global_channel(channel_id):
+            await message.reply(f"✅ Channel `{channel_id}` added to broadcast list.")
         else:
-            return await message.reply(f"Invalid format. Use ID or username.")
-        
-        if item_type == "group":
-            success = await add_global_group(item_id)
-        else:
-            success = await add_global_channel(item_id)
-        
-        if success:
-            await message.reply(f"✅ {item_type.capitalize()} `{item_id}` added to broadcast list.")
-        else:
-            await message.reply(f"❌ Failed to add {item_type}.")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
+            await message.reply("❌ Failed to add channel.")
+    except ValueError:
+        await message.reply("Invalid channel ID.")
+
+@Client.on_message(filters.command("listgroups") & filters.private & is_owner_or_admin)
+async def list_groups_cmd(client: Client, message: Message):
+    items = await get_global_groups()
+    if not items:
+        return await message.reply("No groups in list.")
+    text = "**📡 Broadcast Groups:**\n\n"
+    for iid in items:
+        try:
+            chat = await client.get_chat(iid)
+            text += f"• {chat.title}\n  `{iid}`\n\n"
+        except:
+            text += f"• Unknown Group\n  `{iid}`\n\n"
+    await message.reply(text)
+
+@Client.on_message(filters.command("listchannels") & filters.private & is_owner_or_admin)
+async def list_channels_cmd(client: Client, message: Message):
+    items = await get_global_channels()
+    if not items:
+        return await message.reply("No channels in list.")
+    text = "**📡 Broadcast Channels:**\n\n"
+    for iid in items:
+        try:
+            chat = await client.get_chat(iid)
+            text += f"• {chat.title}\n  `{iid}`\n\n"
+        except:
+            text += f"• Unknown Channel\n  `{iid}`\n\n"
+    await message.reply(text)
 
 @Client.on_message(filters.command("delgroup") & filters.private & is_owner_or_admin)
 async def quick_del_group(client: Client, message: Message):
     if len(message.command) != 2:
         return await message.reply("Usage: /delgroup -1001234567890")
-    await quick_del_item(client, message, "group")
+    try:
+        group_id = int(message.command[1])
+        if await remove_global_group(group_id):
+            await message.reply(f"✅ Group `{group_id}` removed from broadcast list.")
+        else:
+            await message.reply("❌ Group not found.")
+    except ValueError:
+        await message.reply("Invalid group ID.")
 
 @Client.on_message(filters.command("delchannel") & filters.private & is_owner_or_admin)
 async def quick_del_channel(client: Client, message: Message):
     if len(message.command) != 2:
         return await message.reply("Usage: /delchannel -1001234567890")
-    await quick_del_item(client, message, "channel")
-
-async def quick_del_item(client: Client, message: Message, item_type: str):
     try:
-        item_id = int(message.command[1])
-        if item_type == "group":
-            success = await remove_global_group(item_id)
+        channel_id = int(message.command[1])
+        if await remove_global_channel(channel_id):
+            await message.reply(f"✅ Channel `{channel_id}` removed from broadcast list.")
         else:
-            success = await remove_global_channel(item_id)
-        
-        if success:
-            await message.reply(f"✅ {item_type.capitalize()} `{item_id}` removed from broadcast list.")
-        else:
-            await message.reply(f"❌ {item_type.capitalize()} not found.")
+            await message.reply("❌ Channel not found.")
     except ValueError:
-        await message.reply(f"Invalid {item_type} ID.")
-
-@Client.on_message(filters.command("listgroups") & filters.private & is_owner_or_admin)
-async def list_groups_cmd(client: Client, message: Message):
-    await list_items(client, message, "group")
-
-@Client.on_message(filters.command("listchannels") & filters.private & is_owner_or_admin)
-async def list_channels_cmd(client: Client, message: Message):
-    await list_items(client, message, "channel")
-
-async def list_items(client: Client, message: Message, item_type: str):
-    if item_type == "group":
-        items = await get_global_groups()
-    else:
-        items = await get_global_channels()
-    
-    if not items:
-        return await message.reply(f"No {item_type}s in list.\n\nUse /add{item_type} to add.")
-    
-    text = f"**📡 Broadcast {item_type.upper()}S:**\n\n"
-    for iid in items:
-        try:
-            chat = await client.get_chat(iid)
-            if item_type == "group":
-                member_count = getattr(chat, 'members_count', '?')
-                text += f"• {chat.title}\n  `{iid}` | Members: {member_count}\n\n"
-            else:
-                text += f"• {chat.title}\n  `{iid}`\n\n"
-        except:
-            text += f"• Unknown {item_type}\n  `{iid}`\n\n"
-    
-    if len(text) > 4000:
-        await message.reply(f"Too many {item_type}s! Use /{item_type}_broadcast menu instead.")
-    else:
-        await message.reply(text)
+        await message.reply("Invalid channel ID.")
 
 # ============ CANCEL COMMAND ============
 
