@@ -11,12 +11,9 @@ from database.database import (
 broadcast_sessions = {}
 
 def fix_id(id_value):
-    """Convert ID to proper Telegram format with -100 prefix if needed"""
     id_str = str(id_value).strip()
-    # If it's already negative, return as is
     if id_str.startswith('-'):
         return int(id_str)
-    # If it's a positive number, assume it needs -100 prefix
     try:
         num = int(id_str)
         if num > 0:
@@ -44,12 +41,10 @@ async def show_broadcast_menu(client: Client, message: Message, chat_type: str):
     if not items:
         await message.reply(
             f"❌ No {chat_type}s in list.\n\n"
-            f"Use /add{chat_type} 96022547 (auto adds -100 prefix)\n"
-            f"Or /add{chat_type} -10096022547"
+            f"Use /add{chat_type} 96022547 (auto adds -100 prefix)"
         )
         return
     
-    # Send new menu message
     menu_msg = await message.reply("Loading menu...")
     
     broadcast_sessions[user_id] = {
@@ -82,7 +77,6 @@ async def render_menu(client: Client, user_id: int):
     
     buttons = []
     
-    # Add items with checkboxes
     for item_id in page_items:
         try:
             chat = await client.get_chat(item_id)
@@ -94,7 +88,6 @@ async def render_menu(client: Client, user_id: int):
         checkbox = "✅" if is_selected else "⬜"
         buttons.append([InlineKeyboardButton(f"{checkbox} {name}", callback_data=f"broad_toggle_{session['type']}_{item_id}")])
     
-    # Navigation buttons
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"broad_prev_{session['type']}"))
@@ -103,7 +96,6 @@ async def render_menu(client: Client, user_id: int):
     if nav:
         buttons.append(nav)
     
-    # Action buttons
     action_row = []
     if session["selected"]:
         action_row.append(InlineKeyboardButton(f"📢 Send to Selected ({len(session['selected'])})", callback_data=f"broad_selected_{session['type']}"))
@@ -111,7 +103,6 @@ async def render_menu(client: Client, user_id: int):
     action_row.append(InlineKeyboardButton("❌ Cancel", callback_data=f"broad_cancel_{session['type']}"))
     buttons.append(action_row)
     
-    # Management buttons
     buttons.append([
         InlineKeyboardButton("➕ Add", callback_data=f"broad_add_{session['type']}"),
         InlineKeyboardButton("🗑️ Remove", callback_data=f"broad_remove_{session['type']}"),
@@ -135,19 +126,17 @@ async def render_menu(client: Client, user_id: int):
     except Exception as e:
         print(f"Render error: {e}")
 
-# Main callback handler
 @Client.on_callback_query()
 async def broadcast_callback(client: Client, query: CallbackQuery):
     data = query.data
     user_id = query.from_user.id
     
-    # Check if this is a broadcast callback
     if not data.startswith("broad_"):
         return
     
     session = broadcast_sessions.get(user_id)
     if not session:
-        await query.answer("Session expired. Use /grp_broadcast or /channel_broadcast again.", show_alert=True)
+        await query.answer("Session expired. Use /grp_broadcast again.", show_alert=True)
         await query.message.delete()
         return
     
@@ -194,6 +183,7 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             return
         session["send_all"] = False
         session["awaiting_content"] = True
+        # Store the menu message so we can come back later
         await query.message.edit_text(
             f"**📢 BROADCAST TO SELECTED {chat_type.upper()}S**\n\n"
             f"Selected: **{len(session['selected'])}**\n\n"
@@ -229,8 +219,7 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
         await query.message.edit_text(
             f"**➕ ADD NEW {chat_type.upper()}**\n\n"
             f"Send the {chat_type} ID to add:\n"
-            f"Example: `96022547` (auto adds -100 prefix)\n"
-            f"Or: `-10096022547`\n\n"
+            f"Example: `96022547` (auto adds -100 prefix)\n\n"
             f"Send `/cancel` to abort."
         )
         await query.answer()
@@ -267,7 +256,6 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
         else:
             await remove_global_channel(item_id)
         
-        # Refresh items
         if chat_type == "group":
             session["items"] = await get_global_groups()
         else:
@@ -281,6 +269,10 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
     elif action == "back" and chat_type:
         await render_menu(client, user_id)
         await query.answer()
+    
+    # Confirm broadcast start
+    elif action == "confirm" and chat_type:
+        await start_broadcast_execution(client, query)
 
 # Handle text input (add ID or content)
 @Client.on_message(filters.private & ~filters.command(["cancel", "grp_broadcast", "channel_broadcast"]))
@@ -297,17 +289,14 @@ async def handle_broadcast_input(client: Client, message: Message):
     if session.get("awaiting_add"):
         try:
             input_text = message.text.strip()
-            
-            # Auto-fix ID with -100 prefix
             if input_text.isdigit() or (input_text.lstrip('-').isdigit() and not input_text.startswith('-100')):
-                # Convert positive number to -100 prefix format
                 clean_id = input_text.lstrip('-')
                 item_id = int(f"-100{clean_id}")
                 await message.reply(f"🔄 Auto-converted `{input_text}` → `{item_id}`")
             elif input_text.startswith("-100") or input_text.startswith("-"):
                 item_id = int(input_text)
             else:
-                await message.reply(f"❌ Invalid format. Send numeric ID like `96022547` or `-10096022547`")
+                await message.reply("❌ Invalid format. Send numeric ID like `96022547`")
                 return
             
             if chat_type == "group":
@@ -316,7 +305,6 @@ async def handle_broadcast_input(client: Client, message: Message):
                 success = await add_global_channel(item_id)
             
             if success:
-                # Refresh items
                 if chat_type == "group":
                     session["items"] = await get_global_groups()
                 else:
@@ -325,7 +313,7 @@ async def handle_broadcast_input(client: Client, message: Message):
                 await message.reply(f"✅ {chat_type.capitalize()} `{item_id}` added!")
                 await render_menu(client, user_id)
             else:
-                await message.reply(f"❌ Failed to add {chat_type}. It may already exist.")
+                await message.reply(f"❌ Failed to add. It may already exist.")
                 session["awaiting_add"] = False
                 await render_menu(client, user_id)
         except Exception as e:
@@ -336,10 +324,12 @@ async def handle_broadcast_input(client: Client, message: Message):
     
     # Handle broadcast content
     if session.get("awaiting_content"):
+        # Store the content message
         session["content_msg"] = message
         session["awaiting_content"] = False
         
         targets = session["items"] if session["send_all"] else list(session["selected"])
+        
         confirm_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data=f"broad_confirm_{chat_type}")],
             [InlineKeyboardButton("❌ No, Cancel", callback_data=f"broad_cancel_{chat_type}")],
@@ -355,10 +345,7 @@ async def handle_broadcast_input(client: Client, message: Message):
         )
         return
 
-# Confirm and execute broadcast
-@Client.on_callback_query(filters.regex(r"^broad_confirm_"))
-async def confirm_broadcast(client: Client, query: CallbackQuery):
-    data = query.data
+async def start_broadcast_execution(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     session = broadcast_sessions.get(user_id)
     
@@ -370,7 +357,7 @@ async def confirm_broadcast(client: Client, query: CallbackQuery):
     content = session.get("content_msg")
     
     if not content:
-        await query.answer("No content found!", show_alert=True)
+        await query.answer("No content found! Please start over.", show_alert=True)
         return
     
     if session["send_all"]:
@@ -379,7 +366,7 @@ async def confirm_broadcast(client: Client, query: CallbackQuery):
         targets = list(session["selected"])
     
     if not targets:
-        await query.answer("No targets!", show_alert=True)
+        await query.answer("No targets selected!", show_alert=True)
         return
     
     total = len(targets)
@@ -417,24 +404,27 @@ async def confirm_broadcast(client: Client, query: CallbackQuery):
             except Exception:
                 failed += 1
                 failed_list.append(str(target_id))
-        except Exception:
+        except Exception as e:
+            print(f"Broadcast error to {target_id}: {e}")
             failed += 1
             failed_list.append(str(target_id))
         
-        # Update progress every 5 messages
         if i % 5 == 0 or i == total:
             percent = i / total
             percent_int = int(percent * 100)
             filled = int(percent * bar_length)
             progress_bar = "●" * filled + "○" * (bar_length - filled)
             
-            await query.message.edit_text(
-                f"**🔄 BROADCAST IN PROGRESS...**\n\n"
-                f"<blockquote>⏳:</b> [{progress_bar}] <code>{percent_int}%</code></blockquote>\n\n"
-                f"**📊 Total:** `{total}`\n"
-                f"**✅ Successful:** `{successful}`\n"
-                f"**❌ Failed:** `{failed}`"
-            )
+            try:
+                await query.message.edit_text(
+                    f"**🔄 BROADCAST IN PROGRESS...**\n\n"
+                    f"<blockquote>⏳:</b> [{progress_bar}] <code>{percent_int}%</code></blockquote>\n\n"
+                    f"**📊 Total:** `{total}`\n"
+                    f"**✅ Successful:** `{successful}`\n"
+                    f"**❌ Failed:** `{failed}`"
+                )
+            except:
+                pass
     
     # Final result
     progress_bar = "●" * bar_length
@@ -448,6 +438,8 @@ async def confirm_broadcast(client: Client, query: CallbackQuery):
     
     if failed_list and len(failed_list) <= 10:
         result_text += f"\n\n**Failed IDs:**\n" + "\n".join(f"`{iid}`" for iid in failed_list)
+    elif failed_list:
+        result_text += f"\n\n**Failed:** `{len(failed_list)}` targets"
     
     await query.message.edit_text(result_text)
     
@@ -471,48 +463,43 @@ async def cancel_broadcast(client: Client, message: Message):
     else:
         await message.reply("No active broadcast session.")
 
-# Quick add commands with auto -100 prefix
+# Quick add commands
 @Client.on_message(filters.command("addgroup") & filters.private & is_owner_or_admin)
 async def quick_add_group(client: Client, message: Message):
     if len(message.command) != 2:
-        return await message.reply("Usage: /addgroup 96022547 (auto adds -100)\nOr: /addgroup -10096022547")
+        return await message.reply("Usage: /addgroup 96022547")
     try:
         input_id = message.command[1]
-        # Auto-fix ID
         if input_id.isdigit():
             item_id = int(f"-100{input_id}")
             await message.reply(f"🔄 Auto-converted `{input_id}` → `{item_id}`")
         else:
             item_id = int(input_id)
-        
         if await add_global_group(item_id):
             await message.reply(f"✅ Group `{item_id}` added.")
         else:
             await message.reply("❌ Failed to add.")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
+    except:
+        await message.reply("Invalid ID.")
 
 @Client.on_message(filters.command("addchannel") & filters.private & is_owner_or_admin)
 async def quick_add_channel(client: Client, message: Message):
     if len(message.command) != 2:
-        return await message.reply("Usage: /addchannel 96022547 (auto adds -100)\nOr: /addchannel -10096022547")
+        return await message.reply("Usage: /addchannel 96022547")
     try:
         input_id = message.command[1]
-        # Auto-fix ID
         if input_id.isdigit():
             item_id = int(f"-100{input_id}")
             await message.reply(f"🔄 Auto-converted `{input_id}` → `{item_id}`")
         else:
             item_id = int(input_id)
-        
         if await add_global_channel(item_id):
             await message.reply(f"✅ Channel `{item_id}` added.")
         else:
             await message.reply("❌ Failed to add.")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
+    except:
+        await message.reply("Invalid ID.")
 
-# List commands
 @Client.on_message(filters.command("listgroups") & filters.private & is_owner_or_admin)
 async def list_groups_cmd(client: Client, message: Message):
     items = await get_global_groups()
@@ -541,7 +528,6 @@ async def list_channels_cmd(client: Client, message: Message):
             text += f"• Unknown\n  `{iid}`\n\n"
     await message.reply(text)
 
-# Delete commands
 @Client.on_message(filters.command("delgroup") & filters.private & is_owner_or_admin)
 async def del_group_cmd(client: Client, message: Message):
     if len(message.command) != 2:
