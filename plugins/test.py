@@ -1,8 +1,9 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from bot import Bot
 
-@Client.on_message(filters.command("menu") & filters.private)
-async def show_menu(client: Client, message: Message):
+@Bot.on_message(filters.command("menu") & filters.private)
+async def show_menu(client: Bot, message: Message):
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("Button 1", callback_data="btn_1")],
         [InlineKeyboardButton("Button 2", callback_data="btn_2")],
@@ -10,7 +11,7 @@ async def show_menu(client: Client, message: Message):
     ])
     await message.reply("Click any button:", reply_markup=buttons)
 
-@Client.on_callback_query()
-async def handle_buttons(client: Client, query: CallbackQuery):
-    print(f"Received callback: {query.data}")  # This will show in logs
+@Bot.on_callback_query()
+async def handle_buttons(client: Bot, query: CallbackQuery):
+    print(f"Received callback: {query.data}")
     await query.answer(f"You clicked: {query.data}", show_alert=True)
