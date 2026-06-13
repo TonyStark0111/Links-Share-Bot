@@ -503,7 +503,7 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
 
 # ============ AUTO-ADD GROUPS (ONLY GROUPS, NOT CHANNELS) ============
 
-@Client.on_message(filters.group & ~filters.edited)
+@Client.on_message(filters.group)
 async def auto_add_group_to_global(client: Client, message: Message):
     """Auto-add groups when bot receives any message"""
     await add_global_group(message.chat.id)
