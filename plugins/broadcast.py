@@ -109,7 +109,7 @@ async def send_menu(client: Client, chat_id: int, user_id: int, edit_msg_id: int
 
 # ============ CALLBACK HANDLER ============
 
-@Client.on_callback_query()
+@Client.on_callback_query(filters.regex(r"^broad_"))
 async def broadcast_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
