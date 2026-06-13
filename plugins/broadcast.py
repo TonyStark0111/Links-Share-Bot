@@ -77,6 +77,7 @@ async def render_menu(client: Client, user_id: int):
     
     buttons = []
     
+    # FIX: Changed internal callback schema from '_' to ':'
     for item_id in page_items:
         try:
             chat = await client.get_chat(item_id)
@@ -86,27 +87,27 @@ async def render_menu(client: Client, user_id: int):
         
         is_selected = item_id in session["selected"]
         checkbox = "✅" if is_selected else "⬜"
-        buttons.append([InlineKeyboardButton(f"{checkbox} {name}", callback_data=f"broad_toggle_{session['type']}_{item_id}")])
+        buttons.append([InlineKeyboardButton(f"{checkbox} {name}", callback_data=f"broad:toggle:{session['type']}:{item_id}")])
     
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"broad_prev_{session['type']}"))
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"broad:prev:{session['type']}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"broad_next_{session['type']}"))
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"broad:next:{session['type']}"))
     if nav:
         buttons.append(nav)
     
     action_row = []
     if session["selected"]:
-        action_row.append(InlineKeyboardButton(f"📢 Send to Selected ({len(session['selected'])})", callback_data=f"broad_selected_{session['type']}"))
-    action_row.append(InlineKeyboardButton(f"📢 Send to ALL ({len(items)})", callback_data=f"broad_all_{session['type']}"))
-    action_row.append(InlineKeyboardButton("❌ Cancel", callback_data=f"broad_cancel_{session['type']}"))
+        action_row.append(InlineKeyboardButton(f"📢 Send to Selected ({len(session['selected'])})", callback_data=f"broad:selected:{session['type']}"))
+    action_row.append(InlineKeyboardButton(f"📢 Send to ALL ({len(items)})", callback_data=f"broad:all:{session['type']}"))
+    action_row.append(InlineKeyboardButton("❌ Cancel", callback_data=f"broad:cancel:{session['type']}"))
     buttons.append(action_row)
     
     buttons.append([
-        InlineKeyboardButton("➕ Add", callback_data=f"broad_add_{session['type']}"),
-        InlineKeyboardButton("🗑️ Remove", callback_data=f"broad_remove_{session['type']}"),
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"broad_refresh_{session['type']}")
+        InlineKeyboardButton("➕ Add", callback_data=f"broad:add:{session['type']}"),
+        InlineKeyboardButton("🗑️ Remove", callback_data=f"broad:remove:{session['type']}"),
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"broad:refresh:{session['type']}")
     ])
     
     text = f"**📡 SELECT {session['type'].upper()}S TO BROADCAST**\n\n"
@@ -131,16 +132,21 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
     data = query.data
     user_id = query.from_user.id
     
-    if not data.startswith("broad_"):
+    # FIX: Updated matching filter condition
+    if not data.startswith("broad:"):
         return
     
     session = broadcast_sessions.get(user_id)
     if not session:
         await query.answer("Session expired. Use /grp_broadcast again.", show_alert=True)
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except:
+            pass
         return
     
-    parts = data.split("_")
+    # FIX: Split securely by colon
+    parts = data.split(":")
     action = parts[1]
     chat_type = parts[2] if len(parts) > 2 else None
     
@@ -183,7 +189,6 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
             return
         session["send_all"] = False
         session["awaiting_content"] = True
-        # Store the menu message so we can come back later
         await query.message.edit_text(
             f"**📢 BROADCAST TO SELECTED {chat_type.upper()}S**\n\n"
             f"Selected: **{len(session['selected'])}**\n\n"
@@ -238,9 +243,9 @@ async def broadcast_callback(client: Client, query: CallbackQuery):
                 name = chat.title[:30]
             except Exception:
                 name = f"Unknown ({item_id})"
-            buttons.append([InlineKeyboardButton(f"❌ {name}", callback_data=f"broad_remove_confirm_{chat_type}_{item_id}")])
+            buttons.append([InlineKeyboardButton(f"❌ {name}", callback_data=f"broad:remove_confirm:{chat_type}:{item_id}")])
         
-        buttons.append([InlineKeyboardButton("◀️ Back to List", callback_data=f"broad_back_{chat_type}")])
+        buttons.append([InlineKeyboardButton("◀️ Back to List", callback_data=f"broad:back:{chat_type}")])
         
         await query.message.edit_text(
             f"**🗑️ REMOVE {chat_type.upper()}**\n\nClick on an item to remove it:",
@@ -324,16 +329,15 @@ async def handle_broadcast_input(client: Client, message: Message):
     
     # Handle broadcast content
     if session.get("awaiting_content"):
-        # Store the content message
         session["content_msg"] = message
         session["awaiting_content"] = False
         
         targets = session["items"] if session["send_all"] else list(session["selected"])
         
         confirm_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data=f"broad_confirm_{chat_type}")],
-            [InlineKeyboardButton("❌ No, Cancel", callback_data=f"broad_cancel_{chat_type}")],
-            [InlineKeyboardButton("◀️ Back to List", callback_data=f"broad_back_{chat_type}")]
+            [InlineKeyboardButton("✅ Yes, Start Broadcast", callback_data=f"broad:confirm:{chat_type}")],
+            [InlineKeyboardButton("❌ No, Cancel", callback_data=f"broad:cancel:{chat_type}")],
+            [InlineKeyboardButton("◀️ Back to List", callback_data=f"broad:back:{chat_type}")]
         ])
         
         await message.reply(
@@ -372,7 +376,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
     total = len(targets)
     bar_length = 20
     
-    # Initial progress
     progress_bar = "○" * bar_length
     await query.message.edit_text(
         f"**🔄 BROADCAST IN PROGRESS...**\n\n"
@@ -426,7 +429,6 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
             except:
                 pass
     
-    # Final result
     progress_bar = "●" * bar_length
     result_text = (
         f"**✅ BROADCAST COMPLETED ✅**\n\n"
@@ -443,17 +445,14 @@ async def start_broadcast_execution(client: Client, query: CallbackQuery):
     
     await query.message.edit_text(result_text)
     
-    # Cleanup
     if user_id in broadcast_sessions:
         del broadcast_sessions[user_id]
     await query.answer("Broadcast completed!")
 
-# Auto-add groups when bot receives any message
 @Client.on_message(filters.group)
 async def auto_add_group(client: Client, message: Message):
     await add_global_group(message.chat.id)
 
-# Cancel command
 @Client.on_message(filters.command("cancel") & filters.private & is_owner_or_admin)
 async def cancel_broadcast(client: Client, message: Message):
     user_id = message.from_user.id
@@ -463,7 +462,6 @@ async def cancel_broadcast(client: Client, message: Message):
     else:
         await message.reply("No active broadcast session.")
 
-# Quick add commands
 @Client.on_message(filters.command("addgroup") & filters.private & is_owner_or_admin)
 async def quick_add_group(client: Client, message: Message):
     if len(message.command) != 2:
