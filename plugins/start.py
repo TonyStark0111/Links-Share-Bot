@@ -1,4 +1,3 @@
-
 import asyncio
 import base64
 import time
@@ -509,7 +508,6 @@ TIME_WINDOW = timedelta(seconds=10)
 BAN_DURATION = timedelta(hours=1)
 
 """
-
 @Bot.on_message(filters.private)
 async def monitor_messages(client: Bot, message: Message):
     user_id = message.from_user.id
@@ -529,3 +527,5 @@ async def monitor_messages(client: Bot, message: Message):
         return
 
     if user_id not in user_message_count:
+        pass
+"""
