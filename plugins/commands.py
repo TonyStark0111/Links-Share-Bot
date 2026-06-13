@@ -11,6 +11,7 @@ from database.database import (
     save_invite_link, get_current_invite_link, get_link_creation_time
 )
 from bot import Bot
+from config import OWNER_ID
 
 # Store temporary data for pagination
 temp_data = {}
@@ -472,5 +473,7 @@ A powerful Telegram bot to share channel links securely with auto-expiring invit
 • Force subscription
 • Broadcast to groups/channels
 • Auto-approve join requests
+
+**Source:** [GitHub](https://github.com/yourusername/LinkShareBot)
 """
-    await message.reply(about_text)
+    await message.reply(about_text, disable_web_page_preview=True)
