@@ -3,6 +3,9 @@ import os
 from os import environ
 import logging
 from logging.handlers import RotatingFileHandler
+import re
+
+id_pattern = re.compile(r'^.\d+$')
 
 # Recommended
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
@@ -12,9 +15,6 @@ API_HASH = os.environ.get("API_HASH", "013a5c0b1f2c320b98236cf212835d59")
 # Main
 OWNER_ID = int(os.environ.get("OWNER_ID", "6048003536"))
 PORT = os.environ.get("PORT", "8080")
-
-# Support admins – messages from users will be sent to each of these admins privately
-SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
 
 # Database
 DB_URI = os.environ.get("DB_URI", "")
@@ -63,6 +63,7 @@ LOG_FILE_NAME = "links-sharingbot.txt"
 DATABASE_CHANNEL = int(os.environ.get("DATABASE_CHANNEL", "-1002794557747")) # Channel where user links are stored
 #--- ---- ---- --- --- --- - -- -  - - - - - - - - - - - --  - -
 
+# DEFINE ADMINS FIRST
 try:
     ADMINS = []
     for x in (os.environ.get("ADMINS", "6497757690").split()):
@@ -74,6 +75,8 @@ except ValueError:
 ADMINS.append(OWNER_ID)
 ADMINS.append(6048003536)
 
+# THEN DEFINE SUPPORT_ADMINS (AFTER ADMINS IS DEFINED)
+SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
 
 logging.basicConfig(
     level=logging.INFO,
