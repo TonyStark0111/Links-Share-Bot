@@ -1,20 +1,16 @@
 import asyncio
 from pyrogram import filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message
 from bot import Bot
 from config import SUPPORT_ADMINS, OWNER_ID
-from database.database import add_user
-
-# Store mapping: admin_id -> {forwarded_msg_id: user_id}
-# Also store in database for persistence
-from database.database import support_messages_collection
+from database.database import add_user, support_messages_collection
 
 async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
     """Save mapping to database"""
     try:
         await support_messages_collection.update_one(
             {"admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id},
-            {"$set": {"user_id": user_id, "admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id}},
+            {"$set": {"user_id": user_id}},
             upsert=True
         )
     except Exception as e:
@@ -44,27 +40,27 @@ async def forward_to_admin(client: Bot, message: Message):
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
     
-    # Prepare user info
+    # Prepare user info (without HTML formatting to avoid parse errors)
+    username = f"@{user.username}" if user.username else "No username"
     user_info = f"""
-<b>📨 New Message from User</b>
+📨 New Message from User
 
-<b>User ID:</b> <code>{user_id}</code>
-<b>Name:</b> {user.first_name or ''} {user.last_name or ''}
-<b>Username:</b> @{user.username} if user.username else 'No username'
-<b>DC ID:</b> {user.dc_id or 'Unknown'}
+User ID: {user_id}
+Name: {user.first_name or ''} {user.last_name or ''}
+Username: {username}
+DC ID: {user.dc_id or 'Unknown'}
 
-<b>Message:</b>
+Message:
 {message.text or message.caption or 'Media message'}
 """
     
     # Send to each admin
     for admin_id in SUPPORT_ADMINS:
         try:
-            # Send message to admin
+            # Send message to admin (no parse_mode to avoid errors)
             sent = await client.send_message(
                 admin_id,
-                user_info,
-                parse_mode="HTML"
+                user_info
             )
             
             # Store mapping so admin can reply
@@ -80,8 +76,7 @@ async def forward_to_admin(client: Bot, message: Message):
     # Acknowledge user
     try:
         await message.reply(
-            "✅ Your message has been forwarded to our support team. You will receive a reply shortly.",
-            parse_mode="HTML"
+            "✅ Your message has been forwarded to our support team. You will receive a reply shortly."
         )
     except:
         pass
@@ -104,7 +99,7 @@ async def reply_to_user(client: Bot, message: Message):
     user_id = await get_user_id(admin_id, replied_msg.id)
     
     if not user_id:
-        await message.reply("❌ Could not find the original user. The mapping may have expired.")
+        await message.reply("❌ Could not find the original user.")
         return
     
     # Send reply to user
@@ -113,12 +108,11 @@ async def reply_to_user(client: Bot, message: Message):
         if reply_text:
             await client.send_message(
                 user_id,
-                f"<b>📨 Reply from Support:</b>\n\n{reply_text}",
-                parse_mode="HTML"
+                f"📨 Reply from Support:\n\n{reply_text}"
             )
-            await message.reply(f"✅ Reply sent to user <code>{user_id}</code>")
+            await message.reply(f"✅ Reply sent to user {user_id}")
         elif message.media:
             await message.copy(user_id)
-            await message.reply(f"✅ Media forwarded to user <code>{user_id}</code>")
+            await message.reply(f"✅ Media sent to user {user_id}")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {e}")
