@@ -1,4 +1,3 @@
-
 import motor.motor_asyncio
 import base64
 from config import DB_URI, DB_NAME
@@ -12,6 +11,7 @@ database = dbclient[DB_NAME]
 user_data = database['users']
 channels_collection = database['channels']
 fsub_channels_collection = database['fsub_channels']
+support_messages_collection = database['support_messages']  # NEW: for support message mappings
 
 async def add_user(user_id: int) -> bool:
     """Add a user to the database if they don't exist."""
@@ -346,7 +346,6 @@ async def is_approval_off(channel_id: int) -> bool:
         return False
 
 # Global setting for clean join/left messages
-# Global setting for clean join/left messages
 global_settings_collection = database['global_settings']
 
 async def set_global_clean_joinleft(enabled: bool) -> bool:
@@ -369,4 +368,41 @@ async def get_global_clean_joinleft() -> bool:
         return doc["enabled"] if doc and "enabled" in doc else False
     except Exception as e:
         print(f"Error getting global clean_joinleft: {e}")
+        return False
+
+# ========== NEW SUPPORT FUNCTIONS ==========
+
+async def save_support_mapping(admin_id: int, forwarded_msg_id: int, user_id: int) -> bool:
+    """Store mapping: (admin_id, forwarded_msg_id) -> user_id"""
+    try:
+        await support_messages_collection.update_one(
+            {"admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id},
+            {"$set": {"user_id": user_id, "created_at": datetime.utcnow()}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        print(f"Error saving support mapping: {e}")
+        return False
+
+async def get_user_id_by_forwarded_msg(admin_id: int, forwarded_msg_id: int) -> Optional[int]:
+    """Get user ID from admin_id and forwarded message ID."""
+    try:
+        doc = await support_messages_collection.find_one(
+            {"admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id}
+        )
+        return doc["user_id"] if doc else None
+    except Exception as e:
+        print(f"Error fetching support mapping: {e}")
+        return None
+
+async def delete_support_mapping(admin_id: int, forwarded_msg_id: int) -> bool:
+    """Delete mapping after reply (optional cleanup)."""
+    try:
+        result = await support_messages_collection.delete_one(
+            {"admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id}
+        )
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"Error deleting support mapping: {e}")
         return False
