@@ -1,12 +1,15 @@
 import asyncio
+import logging
 from pyrogram import filters
 from pyrogram.types import Message
 from bot import Bot
 from config import SUPPORT_ADMINS, OWNER_ID
 from database.database import add_user, support_messages_collection
 
+logger = logging.getLogger(__name__)
+
 async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
-    """Save mapping to database"""
+    """Save mapping to database with explicit error handling"""
     try:
         await support_messages_collection.update_one(
             {"admin_id": admin_id, "forwarded_msg_id": forwarded_msg_id},
@@ -14,7 +17,7 @@ async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
             upsert=True
         )
     except Exception as e:
-        print(f"Error saving mapping: {e}")
+        logger.error(f"Error saving mapping to DB: {e}")
 
 async def get_user_id(admin_id: int, forwarded_msg_id: int):
     """Get user_id from mapping"""
@@ -24,95 +27,114 @@ async def get_user_id(admin_id: int, forwarded_msg_id: int):
         )
         return doc["user_id"] if doc else None
     except Exception as e:
-        print(f"Error getting mapping: {e}")
+        logger.error(f"Error getting mapping from DB: {e}")
         return None
 
 @Bot.on_message(filters.private & ~filters.command("start") & ~filters.me)
 async def forward_to_admin(client: Bot, message: Message):
-    """Forward any user message to all admins"""
+    """Forward any user message (Text or Media) to all admins seamlessly"""
     user = message.from_user
+    if not user:
+        return
+        
     user_id = user.id
     
-    # Add to database
+    # Add user to global metrics database
     await add_user(user_id)
     
-    # Don't forward admin messages
+    # Don't route messages if the sender is an admin/owner
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
     
-    # Prepare user info (without HTML formatting to avoid parse errors)
     username = f"@{user.username}" if user.username else "No username"
-    user_info = f"""
-📨 New Message from User
-
-User ID: {user_id}
-Name: {user.first_name or ''} {user.last_name or ''}
-Username: {username}
-DC ID: {user.dc_id or 'Unknown'}
-
-Message:
-{message.text or message.caption or 'Media message'}
-"""
+    header_info = (
+        f"📨 <b>New Message from User</b>\n\n"
+        f"<b>User ID:</b> <code>{user_id}</code>\n"
+        f"<b>Name:</b> {user.first_name or ''} {user.last_name or ''}\n"
+        f"<b>Username:</b> {username}\n"
+        f"<b>DC ID:</b> {user.dc_id or 'Unknown'}\n"
+        f"-----------------------------------------\n\n"
+    )
     
-    # Send to each admin
+    # Broadcast inbound ticket to all active support admins
     for admin_id in SUPPORT_ADMINS:
         try:
-            # Send message to admin (no parse_mode to avoid errors)
-            sent = await client.send_message(
-                admin_id,
-                user_info
-            )
-            
-            # Store mapping so admin can reply
-            await save_mapping(admin_id, sent.id, user_id)
-            
-            # If media, forward separately
             if message.media:
-                await message.copy(admin_id)
+                # Construct combined caption safely preserving formatting constraints
+                original_caption = message.caption.html if message.caption else ""
+                combined_caption = f"{header_info}<b>User Caption:</b>\n{original_caption}" if original_caption else header_info
+                
+                # Check for Telegram caption length limitations (Max 1024 characters)
+                if len(combined_caption) > 1024:
+                    # Send info bundle first, then send media separately 
+                    info_msg = await client.send_message(chat_id=admin_id, text=header_info, parse_mode="html")
+                    await save_mapping(admin_id, info_msg.id, user_id)
+                    
+                    media_msg = await message.copy(chat_id=admin_id)
+                    await save_mapping(admin_id, media_msg.id, user_id)
+                else:
+                    # Native high-fidelity media forwarding with metadata integrated
+                    media_msg = await message.copy(chat_id=admin_id, caption=combined_caption, parse_mode="html")
+                    await save_mapping(admin_id, media_msg.id, user_id)
+            else:
+                # Regular text message routing workflow
+                text_content = message.text.html if message.text else ""
+                full_text = f"{header_info}<b>Message:</b>\n{text_content}"
+                
+                sent_msg = await client.send_message(chat_id=admin_id, text=full_text, parse_mode="html")
+                await save_mapping(admin_id, sent_msg.id, user_id)
                 
         except Exception as e:
-            print(f"Failed to send to admin {admin_id}: {e}")
-    
-    # Acknowledge user
+            logger.error(f"Failed to route ticket to admin {admin_id}: {e}")
+            
+    # Acknowledge user ticket receipt securely
     try:
         await message.reply(
-            "✅ Your message has been forwarded to our support team. You will receive a reply shortly."
+            "✅ <b>Your message has been forwarded to our support team. You will receive a reply shortly.</b>",
+            parse_mode="html"
         )
-    except:
+    except Exception:
         pass
 
 @Bot.on_message(filters.private & filters.reply)
 async def reply_to_user(client: Bot, message: Message):
-    """When admin replies to forwarded message, send to user"""
+    """When an admin replies directly to any forwarded message layout, proxy it back to the client"""
     admin_id = message.from_user.id
     
-    # Check if sender is admin
+    # Verify execution credentials
     if admin_id not in SUPPORT_ADMINS and admin_id != OWNER_ID:
         return
     
-    # Get the message they replied to
     replied_msg = message.reply_to_message
     if not replied_msg:
         return
     
-    # Get user_id from mapping
+    # Fetch targeted user index using structural routing table mapping
     user_id = await get_user_id(admin_id, replied_msg.id)
     
     if not user_id:
-        await message.reply("❌ Could not find the original user.")
+        await message.reply("❌ <b>Could not locate the destination mapping for this message.</b>", parse_mode="html")
         return
     
-    # Send reply to user
-    reply_text = message.text or message.caption
     try:
-        if reply_text:
+        # Check if admin is returning native files/media formats or simple text
+        if message.media:
+            # Copy media natively to recipient while retaining admin text amendments
+            original_caption = message.caption.html if message.caption else ""
+            prefix = "📨 <b>Reply from Support:</b>\n\n"
+            new_caption = f"{prefix}{original_caption}" if original_caption else prefix
+            
+            await message.copy(chat_id=user_id, caption=new_caption, parse_mode="html")
+        else:
+            # Routing text response back safely
+            reply_text = message.text.html if message.text else ""
             await client.send_message(
-                user_id,
-                f"📨 Reply from Support:\n\n{reply_text}"
+                chat_id=user_id,
+                text=f"📨 <b>Reply from Support:</b>\n\n{reply_text}",
+                parse_mode="html"
             )
-            await message.reply(f"✅ Reply sent to user {user_id}")
-        elif message.media:
-            await message.copy(user_id)
-            await message.reply(f"✅ Media sent to user {user_id}")
+            
+        await message.reply(f"✅ <b>Reply successfully routed to user:</b> <code>{user_id}</code>", parse_mode="html")
+        
     except Exception as e:
-        await message.reply(f"❌ Failed to send: {e}")
+        await message.reply(f"❌ <b>Failed to deliver message payload:</b>\n<code>{e}</code>", parse_mode="html")
