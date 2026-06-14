@@ -74,7 +74,7 @@ ADMINS.append(OWNER_ID)
 ADMINS.append(6048003536)
 
 # At the VERY END of your config.py, add:
-SUPPORT_ADMINS = [OWNER_ID]  # This sends messages to your owner ID
+SUPPORT_ADMINS = [6048003536, 6497757690]  # Add your admin IDs here
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s - %(levelname)s] - %(name)s - %(message)s",
