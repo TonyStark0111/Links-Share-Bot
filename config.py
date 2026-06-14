@@ -73,9 +73,8 @@ except ValueError:
 ADMINS.append(OWNER_ID)
 ADMINS.append(6048003536)
 
-# SUPPORT ADMINS - default to ADMINS if not specified
-SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
-
+# At the VERY END of your config.py, add:
+SUPPORT_ADMINS = [OWNER_ID]  # This sends messages to your owner ID
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s - %(levelname)s] - %(name)s - %(message)s",
