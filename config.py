@@ -76,7 +76,7 @@ ADMINS.append(OWNER_ID)
 ADMINS.append(6048003536)
 
 # THEN DEFINE SUPPORT_ADMINS (AFTER ADMINS IS DEFINED)
-SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
+SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "6048003536").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
 
 logging.basicConfig(
     level=logging.INFO,
