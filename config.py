@@ -41,9 +41,7 @@ ABOUT_TXT = """<b>Aʙᴏᴜᴛ ᴜs..
 
 ‣ ᴍᴀᴅᴇ ғᴏʀ Cᴜʟᴛᴜʀᴇᴅ S
 
-Adios !!</b>""" # Bhosdiwalo agar developer me Yato ka username hataya to agli baar se koi repo public nhi krunga!!
-
-# Bhosdiwalo agar developer me Yato ka username hataya to agli baar se koi repo public nhi krunga!!
+Adios !!</b>"""
 
 CHANNELS_TXT = """<b>›› ᴀɴɪᴍᴇ ᴄʜᴀɴɴᴇʟ: <a href='https://t.me/animes_cruise'>ᴀɴɪᴍᴇ ᴄʀᴜɪsᴇ</a>
 <blockquote expandable>›› ᴍᴏᴠɪᴇs: <a href='https://t.me/movieflixspot'>ᴍᴏᴠɪᴇғʟɪx sᴘᴏᴛ</a>
@@ -63,7 +61,7 @@ LOG_FILE_NAME = "links-sharingbot.txt"
 DATABASE_CHANNEL = int(os.environ.get("DATABASE_CHANNEL", "-1002794557747")) # Channel where user links are stored
 #--- ---- ---- --- --- --- - -- -  - - - - - - - - - - - --  - -
 
-# DEFINE ADMINS FIRST
+# DEFINE ADMINS
 try:
     ADMINS = []
     for x in (os.environ.get("ADMINS", "6497757690").split()):
@@ -75,8 +73,8 @@ except ValueError:
 ADMINS.append(OWNER_ID)
 ADMINS.append(6048003536)
 
-# THEN DEFINE SUPPORT_ADMINS (AFTER ADMINS IS DEFINED)
-SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "6048003536").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
+# SUPPORT ADMINS - default to ADMINS if not specified
+SUPPORT_ADMINS = [int(x) for x in os.environ.get("SUPPORT_ADMINS", "").split()] if os.environ.get("SUPPORT_ADMINS") else ADMINS.copy()
 
 logging.basicConfig(
     level=logging.INFO,
