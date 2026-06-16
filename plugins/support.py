@@ -70,25 +70,13 @@ async def forward_to_admin(client: Bot, message: Message):
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
 
-    # Fetch full user info to get the Data Centre (DC) ID
-    dc_id = "Unknown"
-    try:
-        full_user = await client.get_users(user_id)
-        if full_user.dc_id:
-            dc_id = f"{full_user.dc_id}"
-    except Exception as e:
-        print(f"Failed to fetch DC ID: {e}")
-
     username = f"@{user.username}" if user.username else "No Username"
-    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
 
     header = (
-        f"📨 **New Support Message**\n\n"
-        f"👤 **Name:** {full_name}\n"
-        f"🆔 **User ID:** `{user_id}`\n"
-        f"🔗 **Username:** {username}\n"
-        f"🪪 **DM iD:** [Link](tg://user?id={user_id})\n"
-        f"🌎 **DC:** {dc_id}"
+        f"📨 New Support Message\n\n"
+        f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
+        f"🆔 User ID: {user_id}\n"
+        f"🔗 Username: {username}"
     )
 
     for admin_id in SUPPORT_ADMINS:
