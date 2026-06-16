@@ -1,3 +1,4 @@
+import asyncio
 from pyrogram import filters
 from pyrogram.types import Message
 from bot import Bot
@@ -6,7 +7,7 @@ from database.database import add_user, support_messages_collection
 
 
 # =========================
-# DATABASE FUNCTIONS
+# DATABASE HELPERS
 # =========================
 
 async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
@@ -29,14 +30,17 @@ async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
 
 async def get_user_id(admin_id: int, forwarded_msg_id: int):
     try:
-        doc = await support_messages_collection.find_one(
+        data = await support_messages_collection.find_one(
             {
                 "admin_id": admin_id,
                 "forwarded_msg_id": forwarded_msg_id
             }
         )
 
-        return doc["user_id"] if doc else None
+        if data:
+            return data["user_id"]
+
+        return None
 
     except Exception as e:
         print(f"get_user_id error: {e}")
@@ -49,8 +53,8 @@ async def get_user_id(admin_id: int, forwarded_msg_id: int):
 
 @Bot.on_message(
     filters.private
-    & ~filters.command(["start"])
     & ~filters.reply
+    & ~filters.command(["start"])
 )
 async def forward_to_admin(client: Bot, message: Message):
 
@@ -60,38 +64,39 @@ async def forward_to_admin(client: Bot, message: Message):
     user = message.from_user
     user_id = user.id
 
-    # Ignore admins
+    await add_user(user_id)
+
+    # Ignore admin messages
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
 
-    await add_user(user_id)
+    # Fetch full user info to get the Data Centre (DC) ID
+    dc_id = "Unknown"
+    try:
+        full_user = await client.get_users(user_id)
+        if full_user.dc_id:
+            dc_id = f"{full_user.dc_id}"
+    except Exception as e:
+        print(f"Failed to fetch DC ID: {e}")
 
-    username = (
-        f"@{user.username}"
-        if user.username
-        else "No Username"
-    )
-
-    dc_id = getattr(user, "dc_id", "Unknown")
+    username = f"@{user.username}" if user.username else "No Username"
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
 
     header = (
-        f"📨 New Support Message\n\n"
-        f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
-        f"♀️ Mention: tg://user?id={user_id}\n"
-        f"🆔 User ID: {user_id}\n"
-        f"🪪 DM ID: tg://user?id={user_id}\n"
-        f"🔗 Username: {username}\n"
-        f"🌎 DC: {dc_id}"
+        f"📨 **New Support Message**\n\n"
+        f"👤 **Name:** {full_name}\n"
+        f"🆔 **User ID:** `{user_id}`\n"
+        f"🔗 **Username:** {username}\n"
+        f"🪪 **DM iD:** [Link](tg://user?id={user_id})\n"
+        f"🌎 **DC:** {dc_id}"
     )
 
     for admin_id in SUPPORT_ADMINS:
         try:
-
             # Send user info
             info_msg = await client.send_message(
                 admin_id,
-                header,
-                disable_web_page_preview=True
+                header
             )
 
             await save_mapping(
@@ -100,20 +105,17 @@ async def forward_to_admin(client: Bot, message: Message):
                 user_id
             )
 
-            # Copy original user message
-            copied_msg = await message.copy(admin_id)
+            # Copy original message
+            copied = await message.copy(admin_id)
 
             await save_mapping(
                 admin_id,
-                copied_msg.id,
+                copied.id,
                 user_id
             )
 
         except Exception as e:
-            print(
-                f"Failed sending support message to "
-                f"{admin_id}: {e}"
-            )
+            print(f"Failed sending to admin {admin_id}: {e}")
 
     try:
         await message.reply_text(
@@ -127,10 +129,7 @@ async def forward_to_admin(client: Bot, message: Message):
 # ADMIN -> USER
 # =========================
 
-@Bot.on_message(
-    filters.private
-    & filters.reply
-)
+@Bot.on_message(filters.private & filters.reply)
 async def reply_to_user(client: Bot, message: Message):
 
     if not message.from_user:
@@ -138,20 +137,17 @@ async def reply_to_user(client: Bot, message: Message):
 
     admin_id = message.from_user.id
 
-    if (
-        admin_id not in SUPPORT_ADMINS
-        and admin_id != OWNER_ID
-    ):
+    if admin_id not in SUPPORT_ADMINS and admin_id != OWNER_ID:
         return
 
-    replied_message = message.reply_to_message
+    replied = message.reply_to_message
 
-    if not replied_message:
+    if not replied:
         return
 
     user_id = await get_user_id(
         admin_id,
-        replied_message.id
+        replied.id
     )
 
     if not user_id:
@@ -159,26 +155,50 @@ async def reply_to_user(client: Bot, message: Message):
 
     try:
 
-        # Text reply
+        # TEXT
         if message.text:
-
             await client.send_message(
-                chat_id=user_id,
-                text=f"💬 Support Reply\n\n{message.text}"
+                user_id,
+                f"💬 Support Reply:\n\n{message.text}"
             )
 
-        # Photo, Video, Document, Audio,
-        # Voice, Sticker, GIF, etc.
-        else:
+        # PHOTO
+        elif message.photo:
+            await message.copy(user_id)
 
+        # VIDEO
+        elif message.video:
+            await message.copy(user_id)
+
+        # DOCUMENT
+        elif message.document:
+            await message.copy(user_id)
+
+        # AUDIO
+        elif message.audio:
+            await message.copy(user_id)
+
+        # VOICE
+        elif message.voice:
+            await message.copy(user_id)
+
+        # STICKER
+        elif message.sticker:
+            await message.copy(user_id)
+
+        # ANIMATION/GIF
+        elif message.animation:
+            await message.copy(user_id)
+
+        # ANY OTHER MEDIA
+        else:
             await message.copy(user_id)
 
         await message.reply_text(
-            f"✅ Reply sent to user {user_id}"
+            f"✅ Reply sent to user `{user_id}`"
         )
 
     except Exception as e:
-
         await message.reply_text(
             f"❌ Failed to send reply\n\n{e}"
         )
