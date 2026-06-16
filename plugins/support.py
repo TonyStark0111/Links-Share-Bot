@@ -1,4 +1,3 @@
-import asyncio
 from pyrogram import filters
 from pyrogram.types import Message
 from bot import Bot
@@ -7,7 +6,7 @@ from database.database import add_user, support_messages_collection
 
 
 # =========================
-# DATABASE HELPERS
+# DATABASE FUNCTIONS
 # =========================
 
 async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
@@ -30,15 +29,15 @@ async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
 
 async def get_user_id(admin_id: int, forwarded_msg_id: int):
     try:
-        data = await support_messages_collection.find_one(
+        doc = await support_messages_collection.find_one(
             {
                 "admin_id": admin_id,
                 "forwarded_msg_id": forwarded_msg_id
             }
         )
 
-        if data:
-            return data["user_id"]
+        if doc:
+            return doc["user_id"]
 
         return None
 
@@ -53,7 +52,6 @@ async def get_user_id(admin_id: int, forwarded_msg_id: int):
 
 @Bot.on_message(
     filters.private
-    & ~filters.reply
     & ~filters.command(["start"])
 )
 async def forward_to_admin(client: Bot, message: Message):
@@ -64,27 +62,41 @@ async def forward_to_admin(client: Bot, message: Message):
     user = message.from_user
     user_id = user.id
 
-    await add_user(user_id)
-
-    # Ignore admin messages
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
 
-    username = f"@{user.username}" if user.username else "No Username"
+    await add_user(user_id)
+
+    username = (
+        f"@{user.username}"
+        if user.username
+        else "No Username"
+    )
+
+    mention = (
+        f'<a href="tg://user?id={user_id}">{user.first_name}</a>'
+    )
+
+    dc_id = getattr(user, "dc_id", "Unknown")
 
     header = (
-        f"📨 New Support Message\n\n"
-        f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
-        f"🆔 User ID: {user_id}\n"
-        f"🔗 Username: {username}"
+        f"📨 <b>New Support Message</b>\n\n"
+        f"👤 <b>Name:</b> {user.first_name or ''} {user.last_name or ''}\n"
+        f"♀️ <b>Mention:</b> {mention}\n"
+        f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+        f"🪪 <b>DM ID:</b> <code>tg://user?id={user_id}</code>\n"
+        f"🔗 <b>Username:</b> {username}\n"
+        f"🌎 <b>DC:</b> {dc_id}"
     )
 
     for admin_id in SUPPORT_ADMINS:
         try:
-            # Send user info
+
             info_msg = await client.send_message(
-                admin_id,
-                header
+                chat_id=admin_id,
+                text=header,
+                parse_mode="html",
+                disable_web_page_preview=True
             )
 
             await save_mapping(
@@ -93,17 +105,19 @@ async def forward_to_admin(client: Bot, message: Message):
                 user_id
             )
 
-            # Copy original message
-            copied = await message.copy(admin_id)
+            copied_msg = await message.copy(admin_id)
 
             await save_mapping(
                 admin_id,
-                copied.id,
+                copied_msg.id,
                 user_id
             )
 
         except Exception as e:
-            print(f"Failed sending to admin {admin_id}: {e}")
+            print(
+                f"Failed sending support message "
+                f"to {admin_id}: {e}"
+            )
 
     try:
         await message.reply_text(
@@ -117,7 +131,10 @@ async def forward_to_admin(client: Bot, message: Message):
 # ADMIN -> USER
 # =========================
 
-@Bot.on_message(filters.private & filters.reply)
+@Bot.on_message(
+    filters.private
+    & filters.reply
+)
 async def reply_to_user(client: Bot, message: Message):
 
     if not message.from_user:
@@ -125,17 +142,20 @@ async def reply_to_user(client: Bot, message: Message):
 
     admin_id = message.from_user.id
 
-    if admin_id not in SUPPORT_ADMINS and admin_id != OWNER_ID:
+    if (
+        admin_id not in SUPPORT_ADMINS
+        and admin_id != OWNER_ID
+    ):
         return
 
-    replied = message.reply_to_message
+    replied_message = message.reply_to_message
 
-    if not replied:
+    if not replied_message:
         return
 
     user_id = await get_user_id(
         admin_id,
-        replied.id
+        replied_message.id
     )
 
     if not user_id:
@@ -145,48 +165,22 @@ async def reply_to_user(client: Bot, message: Message):
 
         # TEXT
         if message.text:
+
             await client.send_message(
-                user_id,
-                f"💬 Support Reply:\n\n{message.text}"
+                chat_id=user_id,
+                text=f"💬 Support Reply\n\n{message.text}"
             )
 
-        # PHOTO
-        elif message.photo:
-            await message.copy(user_id)
-
-        # VIDEO
-        elif message.video:
-            await message.copy(user_id)
-
-        # DOCUMENT
-        elif message.document:
-            await message.copy(user_id)
-
-        # AUDIO
-        elif message.audio:
-            await message.copy(user_id)
-
-        # VOICE
-        elif message.voice:
-            await message.copy(user_id)
-
-        # STICKER
-        elif message.sticker:
-            await message.copy(user_id)
-
-        # ANIMATION/GIF
-        elif message.animation:
-            await message.copy(user_id)
-
-        # ANY OTHER MEDIA
+        # ALL MEDIA
         else:
             await message.copy(user_id)
 
         await message.reply_text(
-            f"✅ Reply sent to user `{user_id}`"
+            f"✅ Reply sent to user {user_id}"
         )
 
     except Exception as e:
+
         await message.reply_text(
             f"❌ Failed to send reply\n\n{e}"
         )
