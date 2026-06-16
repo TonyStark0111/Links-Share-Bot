@@ -36,10 +36,7 @@ async def get_user_id(admin_id: int, forwarded_msg_id: int):
             }
         )
 
-        if doc:
-            return doc["user_id"]
-
-        return None
+        return doc["user_id"] if doc else None
 
     except Exception as e:
         print(f"get_user_id error: {e}")
@@ -53,6 +50,7 @@ async def get_user_id(admin_id: int, forwarded_msg_id: int):
 @Bot.on_message(
     filters.private
     & ~filters.command(["start"])
+    & ~filters.reply
 )
 async def forward_to_admin(client: Bot, message: Message):
 
@@ -62,6 +60,7 @@ async def forward_to_admin(client: Bot, message: Message):
     user = message.from_user
     user_id = user.id
 
+    # Ignore admins
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
 
@@ -73,29 +72,25 @@ async def forward_to_admin(client: Bot, message: Message):
         else "No Username"
     )
 
-    mention = (
-        f'<a href="tg://user?id={user_id}">{user.first_name}</a>'
-    )
-
     dc_id = getattr(user, "dc_id", "Unknown")
 
     header = (
-        f"📨 <b>New Support Message</b>\n\n"
-        f"👤 <b>Name:</b> {user.first_name or ''} {user.last_name or ''}\n"
-        f"♀️ <b>Mention:</b> {mention}\n"
-        f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
-        f"🪪 <b>DM ID:</b> <code>tg://user?id={user_id}</code>\n"
-        f"🔗 <b>Username:</b> {username}\n"
-        f"🌎 <b>DC:</b> {dc_id}"
+        f"📨 New Support Message\n\n"
+        f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
+        f"♀️ Mention: tg://user?id={user_id}\n"
+        f"🆔 User ID: {user_id}\n"
+        f"🪪 DM ID: tg://user?id={user_id}\n"
+        f"🔗 Username: {username}\n"
+        f"🌎 DC: {dc_id}"
     )
 
     for admin_id in SUPPORT_ADMINS:
         try:
 
+            # Send user info
             info_msg = await client.send_message(
-                chat_id=admin_id,
-                text=header,
-                parse_mode="html",
+                admin_id,
+                header,
                 disable_web_page_preview=True
             )
 
@@ -105,6 +100,7 @@ async def forward_to_admin(client: Bot, message: Message):
                 user_id
             )
 
+            # Copy original user message
             copied_msg = await message.copy(admin_id)
 
             await save_mapping(
@@ -115,8 +111,8 @@ async def forward_to_admin(client: Bot, message: Message):
 
         except Exception as e:
             print(
-                f"Failed sending support message "
-                f"to {admin_id}: {e}"
+                f"Failed sending support message to "
+                f"{admin_id}: {e}"
             )
 
     try:
@@ -163,7 +159,7 @@ async def reply_to_user(client: Bot, message: Message):
 
     try:
 
-        # TEXT
+        # Text reply
         if message.text:
 
             await client.send_message(
@@ -171,8 +167,10 @@ async def reply_to_user(client: Bot, message: Message):
                 text=f"💬 Support Reply\n\n{message.text}"
             )
 
-        # ALL MEDIA
+        # Photo, Video, Document, Audio,
+        # Voice, Sticker, GIF, etc.
         else:
+
             await message.copy(user_id)
 
         await message.reply_text(
