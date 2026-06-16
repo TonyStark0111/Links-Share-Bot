@@ -152,7 +152,7 @@ async def reply_to_user(client: Bot, message: Message):
         if message.text:
             await client.send_message(
                 user_id,
-                f"💬 Support Reply:\n\n{message.text}"
+                message.text  # Removed "💬 Support Reply:\n\n"
             )
 
         # PHOTO
