@@ -3,77 +3,190 @@ from pyrogram import filters
 from pyrogram.types import Message
 from bot import Bot
 from config import SUPPORT_ADMINS, OWNER_ID
-from database.database import add_user
+from database.database import add_user, support_messages_collection
 
-# Simple in-memory store
-reply_map = {}
 
-@Bot.on_message(filters.private & ~filters.command("start") & ~filters.me)
+# =========================
+# DATABASE HELPERS
+# =========================
+
+async def save_mapping(admin_id: int, forwarded_msg_id: int, user_id: int):
+    try:
+        await support_messages_collection.update_one(
+            {
+                "admin_id": admin_id,
+                "forwarded_msg_id": forwarded_msg_id
+            },
+            {
+                "$set": {
+                    "user_id": user_id
+                }
+            },
+            upsert=True
+        )
+    except Exception as e:
+        print(f"save_mapping error: {e}")
+
+
+async def get_user_id(admin_id: int, forwarded_msg_id: int):
+    try:
+        data = await support_messages_collection.find_one(
+            {
+                "admin_id": admin_id,
+                "forwarded_msg_id": forwarded_msg_id
+            }
+        )
+
+        if data:
+            return data["user_id"]
+
+        return None
+
+    except Exception as e:
+        print(f"get_user_id error: {e}")
+        return None
+
+
+# =========================
+# USER -> ADMIN
+# =========================
+
+@Bot.on_message(
+    filters.private
+    & ~filters.reply
+    & ~filters.command(["start"])
+)
 async def forward_to_admin(client: Bot, message: Message):
+
+    if not message.from_user:
+        return
+
     user = message.from_user
     user_id = user.id
+
     await add_user(user_id)
 
+    # Ignore admin messages
     if user_id in SUPPORT_ADMINS or user_id == OWNER_ID:
         return
 
-    # Build info text
-    username = f"@{user.username}" if user.username else "No username"
-    msg_text = message.text or message.caption or "📎 Media (no caption)"
-    info = f"""**📨 New message from user**
+    username = f"@{user.username}" if user.username else "No Username"
 
-ID: `{user_id}`
-Name: {user.first_name or ''}
-Username: {username}
-DC: {user.dc_id or '?'}
-
-**Message:**\n{msg_text}"""
+    header = (
+        f"📨 New Support Message\n\n"
+        f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
+        f"🆔 User ID: {user_id}\n"
+        f"🔗 Username: {username}"
+    )
 
     for admin_id in SUPPORT_ADMINS:
         try:
-            if message.media:
-                sent = await message.copy(admin_id, caption=info, parse_mode="Markdown")
-            else:
-                sent = await client.send_message(admin_id, info, parse_mode="Markdown")
-            # Store mapping: (admin_id, sent_message_id) -> user_id
-            reply_map[(admin_id, sent.id)] = user_id
-            print(f"✅ MAPPING SAVED: admin={admin_id}, msg_id={sent.id} -> user={user_id}")
+            # Send user info
+            info_msg = await client.send_message(
+                admin_id,
+                header
+            )
+
+            await save_mapping(
+                admin_id,
+                info_msg.id,
+                user_id
+            )
+
+            # Copy original message
+            copied = await message.copy(admin_id)
+
+            await save_mapping(
+                admin_id,
+                copied.id,
+                user_id
+            )
+
         except Exception as e:
-            print(f"❌ Failed to send to admin {admin_id}: {e}")
+            print(f"Failed sending to admin {admin_id}: {e}")
 
-    await message.reply("✅ Your message has been forwarded to support. You'll receive a reply here.")
+    try:
+        await message.reply_text(
+            "✅ Your message has been sent to support."
+        )
+    except:
+        pass
 
+
+# =========================
+# ADMIN -> USER
+# =========================
 
 @Bot.on_message(filters.private & filters.reply)
 async def reply_to_user(client: Bot, message: Message):
+
+    if not message.from_user:
+        return
+
     admin_id = message.from_user.id
+
     if admin_id not in SUPPORT_ADMINS and admin_id != OWNER_ID:
         return
 
-    replied_msg = message.reply_to_message
-    if not replied_msg:
+    replied = message.reply_to_message
+
+    if not replied:
         return
 
-    print(f"🔍 Admin {admin_id} replied to msg_id={replied_msg.id}")
-    print(f"📋 Current reply_map: {reply_map}")
+    user_id = await get_user_id(
+        admin_id,
+        replied.id
+    )
 
-    # Lookup user
-    user_id = reply_map.get((admin_id, replied_msg.id))
     if not user_id:
-        await message.reply(
-            "❌ Could not find original user.\n\n"
-            "Make sure you're replying to the **exact message** that contains the user's info (ID, name, etc.)"
-        )
         return
 
-    # Send reply
-    reply_text = message.text or message.caption
     try:
-        if reply_text:
-            await client.send_message(user_id, f"**📨 Reply from Support:**\n\n{reply_text}", parse_mode="Markdown")
-            await message.reply(f"✅ Reply sent to user `{user_id}`")
-        elif message.media:
+
+        # TEXT
+        if message.text:
+            await client.send_message(
+                user_id,
+                f"💬 Support Reply:\n\n{message.text}"
+            )
+
+        # PHOTO
+        elif message.photo:
             await message.copy(user_id)
-            await message.reply(f"✅ Media sent to user `{user_id}`")
+
+        # VIDEO
+        elif message.video:
+            await message.copy(user_id)
+
+        # DOCUMENT
+        elif message.document:
+            await message.copy(user_id)
+
+        # AUDIO
+        elif message.audio:
+            await message.copy(user_id)
+
+        # VOICE
+        elif message.voice:
+            await message.copy(user_id)
+
+        # STICKER
+        elif message.sticker:
+            await message.copy(user_id)
+
+        # ANIMATION/GIF
+        elif message.animation:
+            await message.copy(user_id)
+
+        # ANY OTHER MEDIA
+        else:
+            await message.copy(user_id)
+
+        await message.reply_text(
+            f"✅ Reply sent to user `{user_id}`"
+        )
+
     except Exception as e:
-        await message.reply(f"❌ Failed: {e}")
+        await message.reply_text(
+            f"❌ Failed to send reply\n\n{e}"
+        )
