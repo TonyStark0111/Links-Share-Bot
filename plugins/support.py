@@ -71,12 +71,16 @@ async def forward_to_admin(client: Bot, message: Message):
         return
 
     username = f"@{user.username}" if user.username else "No Username"
+    dc_id = user.dc_id if user.dc_id else "Unknown"
+    dm_link = f"tg://user?id={user_id}"
 
     header = (
         f"📨 New Support Message\n\n"
         f"👤 Name: {user.first_name or ''} {user.last_name or ''}\n"
         f"🆔 User ID: {user_id}\n"
-        f"🔗 Username: {username}"
+        f"🪪 DM ID: {dm_link}\n"
+        f"🔗 Username: {username}\n"
+        f"🌎 DC: {dc_id}"
     )
 
     for admin_id in SUPPORT_ADMINS:
@@ -84,7 +88,8 @@ async def forward_to_admin(client: Bot, message: Message):
             # Send user info
             info_msg = await client.send_message(
                 admin_id,
-                header
+                header,
+                disable_web_page_preview=True
             )
 
             await save_mapping(
