@@ -9,11 +9,11 @@ id_pattern = re.compile(r'^.\d+$')
 
 # Recommended
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
-APP_ID = int(os.environ.get("APP_ID", "27050683"))
-API_HASH = os.environ.get("API_HASH", "013a5c0b1f2c320b98236cf212835d59")
+APP_ID = int(os.environ.get("APP_ID", "30128415"))
+API_HASH = os.environ.get("API_HASH", "7e02885160c39ed21e7b2a76ad625dd2")
 
 # Main
-OWNER_ID = int(os.environ.get("OWNER_ID", "6048003536"))
+OWNER_ID = int(os.environ.get("OWNER_ID", "8365451390"))
 PORT = os.environ.get("PORT", "8080")
 
 # Database
@@ -64,17 +64,17 @@ DATABASE_CHANNEL = int(os.environ.get("DATABASE_CHANNEL", "-1002794557747")) # C
 # DEFINE ADMINS
 try:
     ADMINS = []
-    for x in (os.environ.get("ADMINS", "6497757690").split()):
+    for x in (os.environ.get("ADMINS", "").split()):
         ADMINS.append(int(x))
 except ValueError:
     raise Exception("Your Admins list does not contain valid integers.")
 
 # Admin == OWNER_ID
 ADMINS.append(OWNER_ID)
-ADMINS.append(6048003536)
+ADMINS.append(8365451390)
 
 # At the VERY END of your config.py, add:
-SUPPORT_ADMINS = [6048003536, 821215952]  # Add your admin IDs here
+SUPPORT_ADMINS = [6048003536, 8365451390]  # Add your admin IDs here
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s - %(levelname)s] - %(name)s - %(message)s",
